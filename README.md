@@ -192,8 +192,8 @@ a **remote whisper-server URL**, no process is started and that server is used i
   the same.
 - **Recording the same lecture twice** appends to the Transcript section rather than
   replacing it, so a quick test recording before class does not wipe the real one.
-- **Course names** — notes are named after what you type in the panel ("CSCI578"), not
-  Canvas's long title ("Fall 2026 BIOINFORMATICS (CSCI-578-A, …)"). The first time a typed
+- **Course names** — notes are named after what you type in the panel ("CSCI578") when that differs from
+  Canvas's title ("Fall 2026 BIOINFORMATICS (CSCI-578-A, …)"); otherwise the Canvas name is used. The first time a typed
   name matches a Canvas course, the pairing is saved under *Course names* in the Canvas
   settings; edit it there if a course should use a different folder.
 - **Maximum chunk length** — shorter chunks show text sooner but give Whisper less context.

@@ -388,7 +388,7 @@ export class LectureCompanionSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Course names")
-			.setDesc("Canvas course → name used for notes, one per line: `canvas id, code or name = My name`. Filled in automatically from the course you type in the panel; without an entry the Canvas course code is used.")
+			.setDesc("Canvas course → name used for notes, one per line: `canvas id, code or name = My name`. Filled in automatically when the course you type in the panel differs from Canvas's; otherwise the full Canvas name is used.")
 			.addTextArea((t) =>
 				t.setPlaceholder("12345 = CSCI578").setValue(s.courseAliases).onChange(async (v) => {
 					s.courseAliases = v;

@@ -55,7 +55,8 @@ describe("transcript and slides markdown", () => {
 
 	it("renders a full lecture note skeleton", () => {
 		const md = renderLectureNote({ course: "CS101", date: "2026-11-05", audioPath: "a/b/rec.webm" });
-		expect(md.startsWith('---\ncourse: "CS101"\ndate: 2026-11-05\ntags:\n  - lecture\naudio: "[[rec.webm]]"\n---\n\n# CS101 — 2026-11-05\n\n## Slides\n\n_No slides yet._\n\n## Summary')).toBe(true);
+		expect(md.startsWith('---\ncourse: "CS101"\ndate: 2026-11-05\ntags:\n  - lecture\naudio: "[[rec.webm]]"\n---\n\n## Slides\n\n_No slides yet._\n\n## Summary')).toBe(true);
+		expect(md).not.toContain("\n# ");
 		expect(sectionBody(md, "Transcript")).toBe("_No transcript yet._");
 		expect(sectionBody(md, "My notes")).toBe("");
 	});
@@ -135,7 +136,7 @@ describe("settings helpers", () => {
 	it("maps Canvas courses to the names used in the vault", () => {
 		const canvas = { id: 777, name: "Fall 2026 BIOINFORMATICS (CSCI-578-A, CSCI-478-A, BIOL-510-A)", courseCode: "CSCI-578-A" };
 		const s = { ...DEFAULT_SETTINGS };
-		expect(vaultCourseName(s, canvas)).toBe("CSCI-578-A");
+		expect(vaultCourseName(s, canvas)).toBe(canvas.name);
 		expect(vaultCourseName(s, { id: 1, name: "No Code" })).toBe("No Code");
 		expect(addCourseAlias(s, canvas, canvas.name)).toBe(false);
 		expect(addCourseAlias(s, canvas, "csci-578-a")).toBe(false);

@@ -239,15 +239,16 @@ export default class LectureCompanionPlugin extends Plugin {
 	/** Creates the lecture note skeleton (and the course note link) when missing. `course` is the vault name (alias). */
 	async ensureLectureNote(course: string, date: string): Promise<NoteTarget> {
 		const target = this.noteTargetFor(course, date);
+		// Course notes carry no H1 either: the file name is the title.
 		if (target.parentHeading) {
-			await this.vault.createIfMissing(target.path, `# ${course}\n`);
+			await this.vault.createIfMissing(target.path, "");
 			return target;
 		}
 		const created = await this.vault.createIfMissing(target.path, renderLectureNote({ course, date }));
 		if (created) {
 			const coursePath = courseNotePath(this.settings.courseFolder, course);
 			const link = `[[${target.path.replace(/\.md$/, "")}|${date} lecture]]`;
-			await this.vault.writeSection({ path: coursePath, parentHeading: dateHeading(this.settings.dateHeading, date) }, "Lectures", `- ${link}`, "append", `# ${course}\n`);
+			await this.vault.writeSection({ path: coursePath, parentHeading: dateHeading(this.settings.dateHeading, date) }, "Lectures", `- ${link}`, "append", "");
 		}
 		return target;
 	}

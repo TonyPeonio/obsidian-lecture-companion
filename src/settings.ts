@@ -132,13 +132,13 @@ export function parseKeyValueLines(text: string): { key: string; value: string }
 	return out;
 }
 
-/** The name notes use for a Canvas course: an alias if one is set, else the course code, else the full name. */
+/** The name notes use for a Canvas course: an alias if one is set, else Canvas's full course name. */
 export function vaultCourseName(settings: LectureCompanionSettings, course: { id: number; name: string; courseCode?: string }): string {
 	const keys = [String(course.id), course.name, course.courseCode ?? ""].filter(Boolean).map((k) => k.toLowerCase());
 	for (const entry of parseKeyValueLines(settings.courseAliases)) {
 		if (keys.includes(entry.key)) return entry.value;
 	}
-	return course.courseCode?.trim() || course.name;
+	return course.name;
 }
 
 /** Adds `id = alias` unless the course already has an alias. Returns true when settings changed. */

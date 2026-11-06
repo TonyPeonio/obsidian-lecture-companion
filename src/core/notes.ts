@@ -126,8 +126,8 @@ export function slidesToMarkdown(slides: SlideAttachment[]): string {
 		.join("\n\n");
 }
 
+/** No H1: Obsidian shows the file name as the inline title, so a heading would repeat it. */
 export function renderLectureNote(input: LectureNoteInput): string {
-	const title = input.title?.trim() || `${input.course} — ${input.date}`;
 	const fm = [
 		"---",
 		`course: "${input.course.replace(/"/g, '\\"')}"`,
@@ -136,10 +136,9 @@ export function renderLectureNote(input: LectureNoteInput): string {
 		"  - lecture",
 	];
 	if (input.audioPath) fm.push(`audio: "[[${input.audioPath.split("/").pop() ?? input.audioPath}]]"`);
+	if (input.title?.trim()) fm.push(`title: "${input.title.trim().replace(/"/g, '\\"')}"`);
 	fm.push("---");
 	const sections = [
-		`# ${title}`,
-		"",
 		`## ${SECTION_SLIDES}`,
 		"",
 		input.slides?.length ? slidesToMarkdown(input.slides) : "_No slides yet._",
