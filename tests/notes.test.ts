@@ -20,7 +20,7 @@ import {
 	upsertSection,
 } from "../src/core/notes";
 import { buildSummaryMessages, fitToContext, stripThinkTags } from "../src/core/summarize";
-import { addCourseAlias, courseNoteOverride, DEFAULT_SETTINGS, parseCourseNotes, parseKeyValueLines, vaultCourseName } from "../src/settings";
+import { addCourseAlias, courseNoteOverride, DEFAULT_SETTINGS, parseCourseNotes, parseKeyValueLines, setCourseAlias, vaultCourseName } from "../src/settings";
 
 describe("paths and formatting", () => {
 	it("sanitizes names and builds paths", () => {
@@ -184,5 +184,20 @@ describe("settings helpers", () => {
 		expect(addCourseAlias(s, canvas, "Other")).toBe(false);
 		expect(vaultCourseName(s, canvas)).toBe("CSCI578");
 		expect(parseKeyValueLines("# c\nA = b\nbad\n = x\n")).toEqual([{ key: "a", value: "b" }]);
+	});
+});
+
+describe("setCourseAlias", () => {
+	it("adds, replaces and clears a course's alias without touching others", () => {
+		const s = { ...DEFAULT_SETTINGS, courseAliases: "111 = Algo\n777 = Old" };
+		const bio = { id: 777, name: "Fall 2026 BIOINFORMATICS", courseCode: "CSCI-578-A" };
+		setCourseAlias(s, bio, "CSCI578");
+		expect(s.courseAliases).toBe("111 = Algo\n777 = CSCI578");
+		expect(vaultCourseName(s, bio)).toBe("CSCI578");
+		setCourseAlias(s, bio, "");
+		expect(s.courseAliases).toBe("111 = Algo");
+		expect(vaultCourseName(s, bio)).toBe(bio.name);
+		setCourseAlias(s, bio, "csci-578-a");
+		expect(s.courseAliases).toBe("111 = Algo");
 	});
 });

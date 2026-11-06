@@ -230,18 +230,17 @@ a **remote whisper-server URL**, no process is started and that server is used i
   by default (`{{notefolder}}/attachments`). Set any vault path, or leave it empty to follow
   Obsidian's "Default location for new attachments". Obsidian cannot embed files from hidden
   (dot) folders, so the folder is a normal one; collapse it in the file explorer.
-- **Course names** — notes are named after what you type in the panel ("CSCI578") when that differs from
-  Canvas's title ("Fall 2026 BIOINFORMATICS (CSCI-578-A, …)"); otherwise the Canvas name is used. The first time a typed
-  name matches a Canvas course, the pairing is saved under *Course names* in the Canvas
-  settings; edit it there if a course should use a different folder.
-- **Maximum chunk length** — shorter chunks show text sooner but give Whisper less context.
-  20 s is a good default; 10–12 s if you want it snappier.
-- **Layout** — *One note per lecture* (recommended; transcripts are long) or *Sections in the
-  course note* with a `## YYYY-MM-DD` heading per day.
-- **Context window** — summaries read the whole transcript; an hour of speech is roughly
-  10–12k tokens. 32768 is the default. If the transcript does not fit it is truncated and the
-  summary says so.
-- **Extra summary instructions** — e.g. "Always list formulas" or "Write in German".
+- **Course names** — notes are filed under `Courses/<name>/…`. By default `<name>` is the
+  course's full Canvas title ("Fall 2026 BIOINFORMATICS (CSCI-578-A, …)"). To use a short name
+  instead, either:
+  1. type it in the panel's course box when you record or import (if it matches a Canvas course,
+     the pairing is saved for you), or
+  2. go to Settings → Lecture Companion → *Course names in the vault* → **Load courses**, and type
+     the name you want next to each Canvas course (leave blank to keep the Canvas title).
+
+  Change a name later and new notes follow it; existing folders are not renamed (rename them in
+  Obsidian's file explorer, which updates the links). The raw list underneath holds the same
+  mapping as `canvas id = name` lines, for copying between machines.
 
 ## Troubleshooting
 

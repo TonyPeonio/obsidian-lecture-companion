@@ -28,7 +28,8 @@ export default class LectureCompanionPlugin extends Plugin {
 	session!: LectureSession;
 	matcher!: SlideMatcher;
 	modelsDir = "";
-	private courses: CanvasCourse[] = [];
+	/** Active Canvas courses, loaded on demand (`refreshCourses`). */
+	courses: CanvasCourse[] = [];
 	private serverListeners = new Set<(state: ServerState) => void>();
 
 	async onload(): Promise<void> {

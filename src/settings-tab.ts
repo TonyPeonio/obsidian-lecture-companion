@@ -3,7 +3,7 @@ import { downloadModel, findModel, formatBytes, isModelInstalled, modelUrl, VAD_
 import { installHint, locateWhisperServer } from "./core/whisper/locate";
 import type LectureCompanionPlugin from "./main";
 import { MicRecorder } from "./recorder";
-import { DEFAULT_SETTINGS } from "./settings";
+import { DEFAULT_SETTINGS, setCourseAlias, vaultCourseName } from "./settings";
 import { INSTALL_SCRIPT_WINDOWS, installerArgs, type WhisperBuild } from "./core/whisper/installer";
 import { cpuCount, defaultThreads, detectGpu, nodeDownloadDeps, nodeLocateDeps, runWindowsInstaller } from "./node/deps";
 
@@ -364,6 +364,7 @@ export class LectureCompanionSettingTab extends PluginSettingTab {
 					const courses = await this.plugin.refreshCourses();
 					canvasResult.setText(`Signed in as ${me.name}. ${courses.length} active course${courses.length === 1 ? "" : "s"}: ${courses.map((c) => c.name).join(", ")}`);
 					canvasResult.addClass("lc-ok");
+					this.display();
 				} catch (err) {
 					canvasResult.setText((err as Error).message);
 					canvasResult.removeClass("lc-ok");
@@ -397,8 +398,46 @@ export class LectureCompanionSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName("Course names")
-			.setDesc("Canvas course → name used for notes, one per line: `canvas id, code or name = My name`. Filled in automatically when the course you type in the panel differs from Canvas's; otherwise the full Canvas name is used.")
+			.setName("Course names in the vault")
+			.setDesc("Notes are filed under these names (Courses/<name>/…). By default a course uses its full Canvas title; type a shorter name here, e.g. CSCI578. Whatever you type in the panel's course box is remembered here automatically.")
+			.addButton((b) =>
+				b.setButtonText("Load courses").onClick(async () => {
+					try {
+						await this.plugin.refreshCourses();
+						renderAliasRows();
+					} catch (err) {
+						new Notice((err as Error).message, 8000);
+					}
+				}),
+			);
+		const aliasRows = containerEl.createDiv({ cls: "lc-alias-rows" });
+		const renderAliasRows = (): void => {
+			aliasRows.empty();
+			const courses = this.plugin.courses;
+			if (courses.length === 0) {
+				aliasRows.createDiv({ cls: "lc-setting-result", text: s.canvasUrl && s.canvasToken ? 'Click "Load courses" to list your Canvas courses.' : "Set the Canvas URL and token first." });
+				return;
+			}
+			for (const course of courses) {
+				const row = new Setting(aliasRows).setName(course.name).setDesc(`${course.courseCode}${course.term ? ` · ${course.term}` : ""} · Canvas id ${course.id}`);
+				row.settingEl.addClass("lc-alias-row");
+				row.addText((t) => {
+					const current = vaultCourseName(s, course);
+					t.setPlaceholder(course.name).setValue(current === course.name ? "" : current).onChange(async (v) => {
+						setCourseAlias(s, course, v);
+						await save();
+					});
+				});
+			}
+		};
+		renderAliasRows();
+		if (s.canvasUrl && s.canvasToken && this.plugin.courses.length === 0) {
+			void this.plugin.refreshCourses().then(renderAliasRows).catch(() => undefined);
+		}
+
+		new Setting(containerEl)
+			.setName("Course names (raw list)")
+			.setDesc("The same mapping as text, one per line: `canvas id, code or name = name in the vault`. Edit only if you need a key other than the id.")
 			.addTextArea((t) =>
 				t.setPlaceholder("12345 = CSCI578").setValue(s.courseAliases).onChange(async (v) => {
 					s.courseAliases = v;

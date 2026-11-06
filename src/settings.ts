@@ -159,6 +159,21 @@ export function addCourseAlias(settings: LectureCompanionSettings, course: { id:
 	return true;
 }
 
+/** Sets (or clears, when `alias` is empty or equals Canvas's own name/code) the vault name for a course. */
+export function setCourseAlias(settings: LectureCompanionSettings, course: { id: number; name: string; courseCode?: string }, alias: string): void {
+	const keys = [String(course.id), course.name, course.courseCode ?? ""].filter(Boolean).map((k) => k.toLowerCase());
+	const kept = settings.courseAliases
+		.split("\n")
+		.filter((line) => {
+			const parsed = parseKeyValueLines(line)[0];
+			return !parsed || !keys.includes(parsed.key);
+		})
+		.filter((line) => line.trim().length > 0);
+	const wanted = alias.trim();
+	if (wanted && !keys.includes(wanted.toLowerCase())) kept.push(`${course.id} = ${wanted}`);
+	settings.courseAliases = kept.join("\n");
+}
+
 export function manualCourseList(settings: LectureCompanionSettings): string[] {
 	return settings.manualCourses
 		.split("\n")
