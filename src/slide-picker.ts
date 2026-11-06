@@ -29,8 +29,8 @@ export class SlidePickerModal extends Modal {
 		this.contentEl.createEl("p", {
 			cls: "lc-picker-hint",
 			text: this.hasTranscript
-				? "Ranked by how much each deck's text overlaps the transcript. The best match is checked; tick another only if the lecture used two decks."
-				: "No transcript yet, so these are ranked by series order and recency only. Check the deck for this lecture.",
+				? "Ranked by how much each file's text overlaps the transcript, and whether it looks like a deck rather than a worksheet. The best match is checked; tick another only if the lecture used two decks."
+				: "No transcript yet, so these are ranked only by how much they look like a deck. Check the deck for this lecture.",
 		});
 		const list = this.contentEl.createDiv({ cls: "lc-picker-list" });
 		for (const r of this.ranked) {

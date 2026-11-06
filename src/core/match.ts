@@ -1,6 +1,7 @@
-// Which slide deck goes with this lecture? Rank a course's decks by how much their text
-// overlaps the transcript (TF-IDF cosine), with small priors for "next in the series" and
-// recency. Pure functions; the plugin gathers candidates and shows the picker.
+// Which slide deck goes with this lecture? Rank a course's files by how much their text
+// overlaps the transcript (TF-IDF cosine) and by how much they look like a deck rather than a
+// worksheet or syllabus. Upload dates play no part. Pure functions; the plugin gathers
+// candidates and shows the picker.
 
 export interface SlideCandidate {
 	id: number;
@@ -13,11 +14,12 @@ export interface SlideCandidate {
 }
 
 export interface RankedSlide extends SlideCandidate {
-	/** 0..1-ish; higher is better. */
+	/** similarity + 0.1 × slideLikeness; higher is better. */
 	score: number;
+	/** 0..1 TF-IDF cosine between the deck's text and the transcript. */
 	similarity: number;
-	sequenceBonus: number;
-	recencyBonus: number;
+	/** -1 (clearly not a deck: worksheet, syllabus…) to +1 (clearly a deck). */
+	slideLikeness: number;
 	/** Human-readable reasons shown in the picker. */
 	reasons: string[];
 	/** Pre-checked in the picker. */
@@ -25,12 +27,8 @@ export interface RankedSlide extends SlideCandidate {
 }
 
 export interface RankOptions {
-	/** Deck names already attached to earlier lectures of this course (for the sequence prior). */
+	/** Deck names already attached to earlier lectures of this course (shown as a label only). */
 	previousNames: string[];
-	/** YYYY-MM-DD of the lecture, for the recency prior. */
-	lectureDate: string;
-	/** Days around the lecture date that count as "recent". */
-	recentDays?: number;
 }
 
 const STOP = new Set(
@@ -93,19 +91,37 @@ export function sequenceNumber(name: string): number | null {
 	return any ? Number(any[1]) : null;
 }
 
-function daysBetween(iso: string, date: string): number | null {
-	const t = Date.parse(iso);
-	const d = Date.parse(`${date}T12:00:00`);
-	if (!Number.isFinite(t) || !Number.isFinite(d)) return null;
-	return Math.abs(t - d) / 86_400_000;
+const DECK_WORDS = /\b(slides?|slideshow|deck|lecture|lec|lect|lesson|class|session|week|wk|chapter|chap|ch|module|unit|part|topic|presentation|intro(?:duction)?|overview|notes)\b|\bl\d{1,2}\b/i;
+const NOT_DECK_WORDS = /\b(homework|hw|assignment|assign|worksheet|exercise|exercises|lab|labs|quiz|quizzes|exam|midterm|final|test|syllabus|rubric|solution|solutions|answers?|key|schedule|calendar|problem\s*set|pset|ps\d|project|proposal|report|paper|article|reading|readings|textbook|handout|form|template|grading|policy|submission|instructions)\b/i;
+
+/**
+ * How much a file looks like a lecture deck, from -1 (worksheet, syllabus, paper) to +1.
+ * Name words decide when they are unambiguous; otherwise the PDF page structure does:
+ * decks have many pages with little text per page and short lines.
+ */
+export function slideLikeness(name: string, text: string): number {
+	const base = name.replace(/\.[a-z0-9]+$/i, "");
+	const ext = name.toLowerCase().split(".").pop() ?? "";
+	const positive = DECK_WORDS.test(base);
+	const negative = NOT_DECK_WORDS.test(base);
+	if (negative && !positive) return -1;
+	if (ext === "pptx" || ext === "ppt") return 1;
+	if (positive && !negative) return 1;
+	const pages = text.split(/^--- Page \d+ ---$/m).filter((p) => p.trim().length > 0);
+	if (pages.length === 0) return positive ? 0.5 : 0;
+	const lines = text.split("\n").filter((l) => l.trim().length > 0 && !/^--- Page/.test(l));
+	const charsPerPage = text.length / pages.length;
+	const shortLines = lines.length ? lines.filter((l) => l.length <= 60).length / lines.length : 0;
+	let score = 0;
+	score += pages.length >= 8 ? 0.3 : pages.length >= 4 ? 0.1 : -0.2;
+	score += charsPerPage <= 700 ? 0.4 : charsPerPage <= 1500 ? 0 : -0.6;
+	score += shortLines >= 0.7 ? 0.3 : shortLines >= 0.5 ? 0 : -0.3;
+	return Math.max(-1, Math.min(1, score));
 }
 
 export function rankSlides(transcript: string, candidates: SlideCandidate[], opts: RankOptions): RankedSlide[] {
 	const sims = tfidfSimilarities(transcript, candidates.map((c) => c.text));
-	const prevNumbers = opts.previousNames.map(sequenceNumber).filter((n): n is number => n !== null);
-	const nextInSeries = prevNumbers.length ? Math.max(...prevNumbers) + 1 : null;
 	const previous = new Set(opts.previousNames.map((n) => n.toLowerCase()));
-	const recentDays = opts.recentDays ?? 3;
 	const hasTranscript = tokenize(transcript).length >= 20;
 
 	const ranked: RankedSlide[] = candidates.map((c, i) => {
@@ -113,38 +129,27 @@ export function rankSlides(transcript: string, candidates: SlideCandidate[], opt
 		const similarity = sims[i] ?? 0;
 		if (!c.text.trim()) reasons.push("no text in file");
 		else if (hasTranscript) reasons.push(`${Math.round(similarity * 100)}% match with transcript`);
-		let sequenceBonus = 0;
-		const n = sequenceNumber(c.name);
-		if (n !== null && nextInSeries !== null) {
-			if (n === nextInSeries) {
-				sequenceBonus = 0.15;
-				reasons.push(`next in series (#${n})`);
-			} else if (n > nextInSeries && n <= nextInSeries + 2) {
-				sequenceBonus = 0.05;
-			}
-		}
+		const likeness = slideLikeness(c.name, c.text);
+		if (likeness <= -0.5) reasons.push("does not look like a deck");
+		else if (likeness >= 0.5) reasons.push("looks like a deck");
 		if (previous.has(c.name.toLowerCase())) reasons.push("used in an earlier lecture");
-		let recencyBonus = 0;
-		const age = daysBetween(c.updatedAt, opts.lectureDate);
-		if (age !== null && age <= recentDays) {
-			recencyBonus = 0.1;
-			reasons.push(age < 1 ? "changed that day" : `changed ${Math.round(age)} day${Math.round(age) === 1 ? "" : "s"} from the lecture`);
-		}
-		return { ...c, similarity, sequenceBonus, recencyBonus, score: similarity + sequenceBonus + recencyBonus, reasons, selected: false };
+		const n = sequenceNumber(c.name);
+		if (n !== null && likeness > 0) reasons.push(`#${n} in its series`);
+		return { ...c, similarity, slideLikeness: likeness, score: similarity + 0.1 * likeness, reasons, selected: false };
 	});
 
 	ranked.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
 	// A lecture almost always has exactly one deck: pre-select only the top candidate, and only
-	// when something actually recommends it (a text match, the series order or recency).
+	// when something recommends it (a text match, or deck-likeness when there is no transcript).
 	const best = ranked[0];
-	if (best && best.score > 0) best.selected = true;
+	if (best && (hasTranscript ? best.similarity > 0 : best.slideLikeness > 0)) best.selected = true;
 	return ranked;
 }
 
 /** True when the top candidate stands out enough to attach without asking (automatic mode). */
 export function isConfident(ranked: RankedSlide[]): boolean {
 	const [a, b] = ranked;
-	if (!a || a.similarity < 0.25) return false;
+	if (!a || a.similarity < 0.2 || !a.selected) return false;
 	if (!b) return true;
-	return a.similarity >= b.similarity * 1.5 || a.similarity - b.similarity >= 0.2;
+	return a.score >= b.score * 1.5 || a.score - b.score >= 0.15;
 }

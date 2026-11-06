@@ -64,7 +64,7 @@ export class SlideMatcher {
 
 		const previousNames = await this.previousDeckNames(req.course, req.target.path);
 		const transcript = cleanTranscript(req.transcript, false);
-		const ranked = rankSlides(transcript, candidates, { previousNames, lectureDate: req.date });
+		const ranked = rankSlides(transcript, candidates, { previousNames });
 		const hasTranscript = transcript.length > 0;
 
 		let chosen: RankedSlide[];

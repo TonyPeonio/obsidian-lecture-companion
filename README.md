@@ -139,15 +139,16 @@ Click the microphone in the ribbon or run **Lecture Companion: Open panel**.
    Summary section. For the next class, press **new recording** (or just type the other
    course and press record): the panel clears and the previous lecture stays in its note.
 4. Before the summary, the plugin **matches slides to the lecture**: it ranks every deck in the
-   Canvas course by how much its text overlaps the transcript (with a nudge for the next deck
-   in the series and for recently changed files) and shows a picker with the best match
+   Canvas course by how much its text overlaps the transcript and by whether it looks like a
+   deck rather than a worksheet, syllabus or paper (file type, words in the name, page
+   structure); upload dates are ignored. It shows a picker with the best match
    checked. Confirm, and the deck is embedded under *Slides* with its text in a folded
    callout, so the summary can use them. Set *Match slides to the lecture* to *Automatic* to
    skip the picker when one deck clearly wins, or *Off*.
    - **Choose slides for this lecture note** re-runs the picker on any lecture note and
      replaces its Slides section (then run *Summarize this lecture note*).
    - **Pull today's Canvas slides** / the **download** button fetch files changed in the
-     look-back window without a transcript; the picker then ranks by series order and recency.
+     look-back window without a transcript; the picker then ranks by deck-likeness only.
      *Pull slides automatically once a day* does this at startup.
    - Decks are downloaded once for matching and their text is cached in the plugin folder
      (`slide-cache.json`), so later matches are instant.
