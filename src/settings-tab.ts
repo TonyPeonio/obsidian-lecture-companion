@@ -622,7 +622,7 @@ export class LectureCompanionSettingTab extends PluginSettingTab {
 			status.addClass("lc-ok");
 			new Notice(`${entry.file} downloaded and verified.`);
 		} catch (err) {
-			const cancelled = err instanceof DOMException && err.name === "AbortError";
+			const cancelled = err instanceof Error && err.name === "AbortError";
 			status.setText(cancelled ? "Download cancelled." : `Download failed: ${(err as Error).message}`);
 			status.removeClass("lc-ok");
 		} finally {

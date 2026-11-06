@@ -244,7 +244,7 @@ export class LectureView extends ItemView {
 			await session.summarize(target);
 			await this.renderSummary(session.summary);
 		} catch (err) {
-			if (!(err instanceof DOMException && err.name === "AbortError")) new Notice(`Summary failed: ${(err as Error).message}`, 8000);
+			if (!(err instanceof Error && err.name === "AbortError")) new Notice(`Summary failed: ${(err as Error).message}`, 8000);
 		}
 	}
 

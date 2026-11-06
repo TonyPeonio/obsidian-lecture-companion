@@ -1,3 +1,4 @@
+/// <reference types="node" />
 // Node-backed implementations of the core's injected dependencies. This plugin is desktop-only
 // (`isDesktopOnly: true`), so Node built-ins are available in Obsidian's renderer.
 
@@ -219,7 +220,9 @@ export function download(
 			const abort = (): void => {
 				req.destroy();
 				file.destroy();
-				reject(new DOMException("Download cancelled", "AbortError"));
+				const err = new Error("Download cancelled");
+				err.name = "AbortError";
+				reject(err);
 			};
 			if (signal?.aborted) {
 				abort();

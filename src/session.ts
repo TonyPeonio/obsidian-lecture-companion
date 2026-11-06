@@ -394,7 +394,7 @@ export class LectureSession {
 			this.emit();
 			return text;
 		} catch (err) {
-			const aborted = err instanceof DOMException && err.name === "AbortError";
+			const aborted = err instanceof Error && err.name === "AbortError";
 			this.status = aborted ? "done" : "error";
 			if (!aborted) this.error = `Summary failed: ${(err as Error).message}`;
 			this.emit();
