@@ -66,31 +66,43 @@ export async function locateWhisperServer(explicitPath: string, deps: LocateDeps
 }
 
 export interface InstallHint {
-	/** A one-line shell command when a package manager ships it. */
+	/** A one-line shell command when a package manager ships it (only works if that package manager is installed). */
 	command?: string;
+	/** What `command` needs, shown next to it. */
+	commandNote?: string;
 	url: string;
+	guideUrl: string;
 	text: string;
 }
 
 export const WHISPER_RELEASES_URL = "https://github.com/ggml-org/whisper.cpp/releases";
+export const INSTALL_GUIDE_URL = "https://github.com/TonyPeonio/obsidian-lecture-companion#installing-whispercpp";
 
 export function installHint(platform: string): InstallHint {
 	if (platform === "win32") {
 		return {
 			command: "scoop install whisper-cpp",
+			commandNote: "only if Scoop is installed",
 			url: WHISPER_RELEASES_URL,
-			text: "Install with Scoop (scoop.sh), or download whisper-bin-x64.zip from the whisper.cpp releases page, unzip it, and point the binary path at whisper-server.exe.",
+			guideUrl: INSTALL_GUIDE_URL,
+			text:
+				"Easiest: run the install script from the plugin's README (Install guide button) in Command Prompt or PowerShell; it downloads the official whisper-bin-x64.zip, verifies it and unpacks it to %LOCALAPPDATA%\\whisper.cpp. " +
+				"Or unzip whisper-bin-x64.zip from the releases page yourself (use a bNNNN build tag; the vX.Y.Z tags carry no files) and paste the path to whisper-server.exe above. " +
+				"The CPU build is the right one; no NVIDIA card needed.",
 		};
 	}
 	if (platform === "darwin") {
 		return {
 			command: "brew install whisper-cpp",
+			commandNote: "needs Homebrew",
 			url: WHISPER_RELEASES_URL,
-			text: "Install with Homebrew, or build whisper.cpp from source and point the binary path at build/bin/whisper-server.",
+			guideUrl: INSTALL_GUIDE_URL,
+			text: "Install with Homebrew, or build whisper.cpp from source and paste the path to build/bin/whisper-server above.",
 		};
 	}
 	return {
 		url: WHISPER_RELEASES_URL,
-		text: "Download whisper-bin-ubuntu-x64.tar.gz from the whisper.cpp releases page (or build from source) and point the binary path at whisper-server.",
+		guideUrl: INSTALL_GUIDE_URL,
+		text: "Download whisper-bin-ubuntu-x64.tar.gz from the releases page (or build from source) and copy whisper-server to ~/.local/bin, or paste its path above.",
 	};
 }

@@ -31,12 +31,8 @@ process and reads files, which mobile Obsidian does not allow.
 
 1. **whisper.cpp** — the `whisper-server` binary. The plugin does not download it (Obsidian's
    developer policy forbids plugins installing their own dependencies); it finds it on your
-   PATH or in the usual places once you install it:
-   - Windows: `scoop install whisper-cpp` ([Scoop](https://scoop.sh)), or unzip
-     `whisper-bin-x64.zip` from the [releases page](https://github.com/ggml-org/whisper.cpp/releases)
-     anywhere and set the binary path in settings.
-   - macOS: `brew install whisper-cpp`
-   - Linux: `whisper-bin-ubuntu-x64.tar.gz` from the releases page, or build from source.
+   PATH or in the usual places once you install it. See [Installing whisper.cpp](#installing-whispercpp)
+   below.
 2. **A Whisper model** — downloaded with one click in settings from the official
    `ggerganov/whisper.cpp` repository on Hugging Face and verified by SHA-256. The default,
    `large-v3-turbo` (1.5 GB), keeps up with live speech on a modern 8-core laptop CPU and is
@@ -46,6 +42,67 @@ process and reads files, which mobile Obsidian does not allow.
    default. Ollama can run on another machine: set its URL in settings.
 4. **A Canvas access token**, for slides (optional). In Canvas: Account → Settings → Approved
    Integrations → *New Access Token*. Paste it into the plugin settings.
+
+## Installing whisper.cpp
+
+The plugin looks for `whisper-server` (`whisper-server.exe` on Windows) on your PATH and in
+these folders: `%LOCALAPPDATA%\whisper.cpp`, `~\whisper.cpp`, `C:\whisper.cpp` and the Scoop
+app folder on Windows; `/opt/homebrew/bin`, `/usr/local/bin`, `~/.local/bin` and
+`~/whisper.cpp/build/bin` elsewhere. Put it anywhere else and paste the full path into
+*Settings → Lecture Companion → whisper-server binary*.
+
+### Windows
+
+**Option A — the install script (no package manager needed).** Download
+[`scripts/install-whisper-windows.ps1`](scripts/install-whisper-windows.ps1) from this
+repository, then run it from a **Command Prompt or PowerShell** window:
+
+```
+powershell -NoProfile -ExecutionPolicy Bypass -File "%USERPROFILE%\Downloads\install-whisper-windows.ps1"
+```
+
+(In PowerShell, write the path as `"$env:USERPROFILE\Downloads\install-whisper-windows.ps1"`.)
+The script downloads the official `whisper-bin-x64.zip` from the whisper.cpp releases page,
+checks its SHA-256, and unpacks it to `%LOCALAPPDATA%\whisper.cpp`. The last lines print
+`Installed: …\whisper-server.exe` and the program's usage text. Read the script first if you
+like: it is 30 lines.
+
+**Option B — by hand.** Download `whisper-bin-x64.zip` from the
+[whisper.cpp releases page](https://github.com/ggml-org/whisper.cpp/releases) (pick a release
+that lists Windows zip files; the plain `vX.Y.Z` tags have no files, the `bNNNN` build tags do).
+Unzip it, and either move the contents of its `Release` folder to
+`C:\Users\<you>\AppData\Local\whisper.cpp`, or paste the full path of `whisper-server.exe` into
+the plugin's *whisper-server binary* setting.
+
+**Option C — Scoop.** If you already use [Scoop](https://scoop.sh): `scoop install whisper-cpp`.
+If Windows says *"'scoop' is not recognized"*, Scoop is not installed; use option A instead.
+
+Things that trip people up:
+
+- **Command Prompt vs PowerShell.** Commands starting with `$` or `Set-ExecutionPolicy` are
+  PowerShell; they fail in Command Prompt with *"is not recognized as an internal or external
+  command"*. The `powershell -File …` line above works in both.
+- **No NVIDIA GPU needed.** The CPU build is the right one for laptops; it uses every core.
+  The `cuda` zips are only for machines with an NVIDIA card and the matching CUDA runtime.
+- **SmartScreen / antivirus** may ask about `whisper-server.exe` the first time it runs. It is
+  the unmodified official build; the script verified its checksum.
+
+### macOS
+
+```
+brew install whisper-cpp
+```
+
+### Linux
+
+Download `whisper-bin-ubuntu-x64.tar.gz` from the releases page, extract it, and copy
+`whisper-server` to `~/.local/bin`; or build from source
+(`cmake -B build && cmake --build build -j`, then the binary is `build/bin/whisper-server`).
+
+### After installing
+
+Settings → Lecture Companion → **Detect** should say `Found: <path>`. Then **Download model**
+(wait for *Installed*) and **Start**; the status line should read `ready · http://127.0.0.1:<port>`.
 
 ## Usage
 
@@ -101,6 +158,21 @@ a **remote whisper-server URL**, no process is started and that server is used i
   10–12k tokens. 32768 is the default. If the transcript does not fit it is truncated and the
   summary says so.
 - **Extra summary instructions** — e.g. "Always list formulas" or "Write in German".
+
+## Troubleshooting
+
+| Symptom | What to check |
+|---|---|
+| **Detect** says *Not found* | whisper.cpp is not installed, or is somewhere the plugin does not look. Paste the full path of `whisper-server.exe` (or `whisper-server`) into *whisper-server binary*. |
+| **Start** fails with *"The Whisper model is not downloaded yet"* | Click **Download model** and wait until the status says *Installed*. Each model id has its own file; switching the dropdown to a model you have not downloaded needs another download. |
+| **Start** fails with *"whisper-server exited (code …)"* | Settings → Server → **Show log**. Common causes: a corrupt model file (delete it from `.obsidian/plugins/lecture-companion/models` and download again), or antivirus blocking the executable. |
+| Server stays on *Loading model…* for a long time | Large models take 10–60 s to load from a slow disk the first time; the plugin waits up to two minutes. A smaller model (`large-v3-turbo-q8_0`, `small`) loads faster. |
+| Record button does nothing / *"Could not start: Permission denied"* | Obsidian was refused microphone access. Windows: Settings → Privacy & security → Microphone → allow desktop apps. macOS: System Settings → Privacy & Security → Microphone → Obsidian. |
+| Transcript falls further and further behind | The CPU cannot keep up with the model. Use `large-v3-turbo-q8_0` or `small`, make sure *Threads* is 0 (all cores), and close other heavy programs. The bar turns orange when the lag passes a minute. |
+| Transcript is empty while the mic level moves | Wrong microphone selected (Settings → Recording → Microphone), or the language setting does not match the lecture (`auto` detects it). |
+| Summary fails with *"Cannot reach Ollama"* | Ollama is not running, or the URL points to another machine that is not reachable. Click **Test** next to the Ollama URL. |
+| Canvas **Test** says *rejected the access token (401)* | The token was pasted incompletely or has expired. Generate a new one in Canvas and paste it again. |
+| Canvas **Test** says *not found (404)* | The Canvas URL is wrong. It must be the address you log in at, e.g. `https://school.instructure.com`, with no path after it. |
 
 ## Privacy and network use
 

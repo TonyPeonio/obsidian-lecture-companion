@@ -49,15 +49,17 @@ export class LectureCompanionSettingTab extends PluginSettingTab {
 		});
 
 		const install = new Setting(containerEl).setName("Install whisper.cpp").setDesc(hint.text);
+		install.addButton((b) => b.setButtonText("Install guide").setCta().onClick(() => window.open(hint.guideUrl)));
+		install.addButton((b) => b.setButtonText("Releases page").onClick(() => window.open(hint.url)));
 		if (hint.command) {
+			const command = hint.command;
 			install.addButton((b) =>
-				b.setButtonText("Copy install command").onClick(async () => {
-					await navigator.clipboard.writeText(hint.command ?? "");
-					new Notice(`Copied: ${hint.command ?? ""}`);
+				b.setButtonText(`Copy "${command}"`).setTooltip(hint.commandNote ?? "").onClick(async () => {
+					await navigator.clipboard.writeText(command);
+					new Notice(`Copied: ${command}${hint.commandNote ? ` (${hint.commandNote})` : ""}`);
 				}),
 			);
 		}
-		install.addButton((b) => b.setButtonText("Releases page").onClick(() => window.open(hint.url)));
 
 		const modelSetting = new Setting(containerEl)
 			.setName("Model")
