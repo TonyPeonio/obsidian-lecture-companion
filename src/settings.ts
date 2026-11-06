@@ -36,6 +36,10 @@ export interface LectureCompanionSettings {
 	/** "Today's" slides include files changed in the last N days (1 = today only). */
 	lookbackDays: number;
 	slideMatching: SlideMatching;
+	/** Convert downloaded .pptx decks to PDF (needs PowerPoint or LibreOffice) so Obsidian shows them inline. */
+	convertPptxToPdf: boolean;
+	/** Keep the original .pptx next to the PDF. */
+	keepPptx: boolean;
 	/** One per line: `canvas course id, name or code = name used in the vault`. Learned automatically from the course picker. */
 	courseAliases: string;
 	courseFolder: string;
@@ -77,6 +81,8 @@ export const DEFAULT_SETTINGS: LectureCompanionSettings = {
 	canvasToken: "",
 	lookbackDays: 1,
 	slideMatching: "ask",
+	convertPptxToPdf: true,
+	keepPptx: false,
 	courseAliases: "",
 	courseFolder: "Courses",
 	courseNotes: "",

@@ -150,6 +150,10 @@ Click the microphone in the ribbon or run **Lecture Companion: Open panel**.
    - **Pull today's Canvas slides** / the **download** button fetch files changed in the
      look-back window without a transcript; the picker then ranks by deck-likeness only.
      *Pull slides automatically once a day* does this at startup.
+   - **PowerPoint decks become PDFs** when PowerPoint (Windows) or LibreOffice is installed,
+     because Obsidian renders PDFs inline but only links a `.pptx`. Text is still extracted from
+     the original. Turn it off, or keep the `.pptx` too, under *Canvas* settings; **Convert
+     PowerPoint decks in this note to PDF** converts decks attached earlier.
    - Decks are downloaded once for matching and their text is cached in the plugin folder
      (`slide-cache.json`), so later matches are instant.
 
@@ -276,8 +280,9 @@ record and is stored only in your vault (if *Keep the audio* is on). The Canvas 
 in this plugin's `data.json` inside your vault's configuration folder, like other plugin
 settings; do not sync that folder to places you do not trust.
 
-The plugin **runs a local program**: `whisper-server` from whisper.cpp, at a path you install
-or choose. It is started with the arguments above and nothing else; it listens on localhost
+The plugin **runs local programs**: `whisper-server` from whisper.cpp, at a path you install
+or choose, and, to turn PowerPoint decks into PDFs, PowerPoint (through PowerShell COM
+automation, hidden) or LibreOffice (`soffice --headless`) when either is installed. It is started with the arguments above and nothing else; it listens on localhost
 only. The plugin never downloads or updates executables itself. On Windows it can open a
 PowerShell window running the bundled installer script (`scripts/install-whisper-windows.ps1`)
 when you click *Install*; the script fetches the pinned official whisper.cpp release from

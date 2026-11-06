@@ -1,7 +1,7 @@
 {
 	"id": "lecture-companion",
 	"name": "Lecture Companion",
-	"version": "0.1.8",
+	"version": "0.1.9",
 	"minAppVersion": "1.7.2",
 	"description": "Record lectures with live local transcription (whisper.cpp), pull the day's slides from Canvas LMS, and summarize with Ollama into your course notes.",
 	"author": "Tony Peonio",

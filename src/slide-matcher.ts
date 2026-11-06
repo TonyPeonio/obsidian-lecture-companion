@@ -86,14 +86,14 @@ export class SlideMatcher {
 			const file = files.get(r.id);
 			if (!file) continue;
 			const safeName = safeFileName(file.displayName || file.filename);
-			if (existing.includes(`[[${safeName}`)) continue;
+			if (existing.includes(`[[${safeName}`) || existing.includes(`[[${safeName.replace(/\.pptx$/i, ".pdf")}`)) continue;
 			req.onStatus?.(`Downloading ${file.displayName}…`);
 			try {
 				const { bytes } = await this.plugin.canvas.download(file);
-				const vaultPath = await this.plugin.vault.attachmentPath(safeName, req.target.path);
-				await this.plugin.vault.createBinary(vaultPath, bytes);
+				const saved = await this.plugin.saveDeck(bytes, safeName, req.target.path);
+				if (saved.note) result.errors.push(`${file.displayName}: ${saved.note}`);
 				attachments.push({
-					vaultPath,
+					vaultPath: saved.vaultPath,
 					title: file.displayName,
 					text: r.text || undefined,
 					source: file.moduleName ? `Canvas · ${file.moduleName}` : "Canvas · Files",

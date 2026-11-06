@@ -397,6 +397,31 @@ export class LectureCompanionSettingTab extends PluginSettingTab {
 					}),
 			);
 
+		const convertSetting = new Setting(containerEl)
+			.setName("Convert PowerPoint decks to PDF")
+			.setDesc("Obsidian shows PDFs inline but can only link a .pptx. Uses PowerPoint (Windows) or LibreOffice if installed; text is still extracted from the original.")
+			.addToggle((t) =>
+				t.setValue(s.convertPptxToPdf).onChange(async (v) => {
+					s.convertPptxToPdf = v;
+					await save();
+				}),
+			);
+		const convertStatus = convertSetting.descEl.createDiv({ cls: "lc-setting-result" });
+		void this.plugin.pptxConverter().then((c) => {
+			convertStatus.setText(c ? `Converter: ${c.kind === "powerpoint" ? "PowerPoint" : "LibreOffice"} (${c.path})` : "No converter found: install LibreOffice (free) or PowerPoint, then restart Obsidian. Decks stay as .pptx until then.");
+			convertStatus.toggleClass("lc-ok", !!c);
+		});
+
+		new Setting(containerEl)
+			.setName("Keep the original .pptx")
+			.setDesc("Also save the PowerPoint file next to the PDF.")
+			.addToggle((t) =>
+				t.setValue(s.keepPptx).onChange(async (v) => {
+					s.keepPptx = v;
+					await save();
+				}),
+			);
+
 		new Setting(containerEl)
 			.setName("Course names in the vault")
 			.setDesc("Notes are filed under these names (Courses/<name>/…). By default a course uses its full Canvas title; type a shorter name here, e.g. CSCI578. Whatever you type in the panel's course box is remembered here automatically.")

@@ -47,15 +47,16 @@ export async function pullSlides(plugin: LectureCompanionPlugin, opts: PullOptio
 		const attachments: SlideAttachment[] = [];
 		for (const file of files) {
 			const safeName = safeFileName(file.displayName || file.filename);
-			if (existing.includes(`[[${safeName}`) || existing.includes(`[[${file.filename}`)) {
+			if (existing.includes(`[[${safeName}`) || existing.includes(`[[${safeName.replace(/\.pptx$/i, ".pdf")}`) || existing.includes(`[[${file.filename}`)) {
 				result.skipped++;
 				continue;
 			}
 			opts.onStatus?.(`Downloading ${file.displayName} (${course.name})…`);
 			try {
 				const { bytes, contentType } = await canvas.download(file);
-				const vaultPath = await plugin.vault.attachmentPath(safeName, target.path);
-				await plugin.vault.createBinary(vaultPath, bytes);
+				const saved = await plugin.saveDeck(bytes, safeName, target.path);
+				const vaultPath = saved.vaultPath;
+				if (saved.note) result.errors.push(`${file.displayName}: ${saved.note}`);
 				let text: string | undefined;
 				if (slideKind(file.displayName, contentType) !== "other") {
 					try {

@@ -4,6 +4,7 @@ import {
 	courseNotePath,
 	detectDate,
 	migrateCourseIndex,
+	replaceAttachmentRefs,
 	isLectureNote,
 	stripFrontmatter,
 	dateHeading,
@@ -218,5 +219,12 @@ describe("setCourseAlias", () => {
 		expect(vaultCourseName(s, bio)).toBe(bio.name);
 		setCourseAlias(s, bio, "csci-578-a");
 		expect(s.courseAliases).toBe("111 = Algo");
+	});
+});
+
+describe("replaceAttachmentRefs", () => {
+	it("repoints embeds, links and aliased links by file name", () => {
+		const md = "![[Deck.pptx]]\n[[Deck.pptx|Deck]] — Canvas\n[[Courses/X/attachments/Deck.pptx]]\n![[Other.pptx]]";
+		expect(replaceAttachmentRefs(md, "Deck.pptx", "Deck.pdf")).toBe("![[Deck.pdf]]\n[[Deck.pdf|Deck]] — Canvas\n[[Deck.pdf]]\n![[Other.pptx]]");
 	});
 });

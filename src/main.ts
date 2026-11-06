@@ -2,7 +2,7 @@ import { Modal, Notice, Platform, Plugin, requestUrl, TFile, type App, type Work
 import { describePull, pullSlides } from "./canvas-pull";
 import { CanvasClient, resolveCourse, type CanvasCourse } from "./core/canvas";
 import type { HttpRequest } from "./core/http";
-import { addLectureLink, courseNotePath, dateHeading, detectDate, lectureNotePath, migrateCourseIndex, renderLectureNote, SECTION_SLIDES, SECTION_TRANSCRIPT, stripFrontmatter, toISODate } from "./core/notes";
+import { addLectureLink, courseNotePath, replaceAttachmentRefs, dateHeading, detectDate, lectureNotePath, migrateCourseIndex, renderLectureNote, SECTION_SLIDES, SECTION_TRANSCRIPT, stripFrontmatter, toISODate } from "./core/notes";
 import { ImportModal, importNotesAsLecture, listImportableNotes } from "./import";
 import { groupEntriesByDate, splitEntries } from "./core/split";
 import { SplitModal, type SplitChoice } from "./split-modal";
@@ -12,6 +12,7 @@ import { locateWhisperServer } from "./core/whisper/locate";
 import { findModel, modelPath, VAD_MODEL } from "./core/whisper/models";
 import { parseExtraArgs, WhisperServerManager, type ServerConfig, type ServerState } from "./core/whisper/server";
 import { defaultThreads, nodeLocateDeps, nodeServerDeps } from "./node/deps";
+import { convertPptxToPdf, findPptxConverter, type PptxConverter } from "./node/convert";
 import { cleanTranscript, LectureSession } from "./session";
 import { addCourseAlias, courseNoteOverride, DEFAULT_SETTINGS, manualCourseList, vaultCourseName, type LectureCompanionSettings } from "./settings";
 import { LectureCompanionSettingTab } from "./settings-tab";
@@ -28,6 +29,7 @@ export default class LectureCompanionPlugin extends Plugin {
 	session!: LectureSession;
 	matcher!: SlideMatcher;
 	modelsDir = "";
+	private converterPromise?: Promise<PptxConverter | null>;
 	/** Active Canvas courses, loaded on demand (`refreshCourses`). */
 	courses: CanvasCourse[] = [];
 	private serverListeners = new Set<(state: ServerState) => void>();
@@ -174,6 +176,28 @@ export default class LectureCompanionPlugin extends Plugin {
 				let total = 0;
 				for (const c of courses) total += await this.rebuildCourseIndex(c);
 				new Notice(`Course notes updated for ${courses.length} course${courses.length === 1 ? "" : "s"} (${total} lecture notes linked).`);
+			},
+		});
+		this.addCommand({
+			id: "convert-pptx-in-note",
+			name: "Convert PowerPoint decks in this note to PDF",
+			checkCallback: (checking) => {
+				const file = this.app.workspace.getActiveFile();
+				if (!(file instanceof TFile) || file.extension !== "md") return false;
+				if (!checking) {
+					const notice = new Notice("Converting…", 0);
+					this.convertPptxInNote(file.path).then(
+						(r) => {
+							notice.hide();
+							new Notice(`${r.converted} deck${r.converted === 1 ? "" : "s"} converted to PDF.${r.errors.length ? ` ${r.errors.join("; ")}` : ""}`, 8000);
+						},
+						(err: Error) => {
+							notice.hide();
+							new Notice(err.message, 8000);
+						},
+					);
+				}
+				return true;
 			},
 		});
 		this.addCommand({
@@ -335,6 +359,70 @@ export default class LectureCompanionPlugin extends Plugin {
 	}
 
 	// ------------------------------------------------------------------- canvas
+
+	/** PowerPoint or LibreOffice, looked up once per session. */
+	pptxConverter(): Promise<PptxConverter | null> {
+		this.converterPromise ??= findPptxConverter();
+		return this.converterPromise;
+	}
+
+	/**
+	 * Saves a downloaded deck into the attachment folder; a .pptx becomes a PDF when a converter is
+	 * available and the setting is on (the original is kept only if asked). Returns the vault path to embed.
+	 */
+	async saveDeck(bytes: ArrayBuffer, fileName: string, forNotePath: string): Promise<{ vaultPath: string; converted: boolean; note?: string }> {
+		const isPptx = /\.pptx$/i.test(fileName);
+		if (isPptx && this.settings.convertPptxToPdf) {
+			const converter = await this.pptxConverter();
+			if (converter) {
+				try {
+					const pdf = await convertPptxToPdf(converter, bytes, fileName);
+					const pdfPath = await this.vault.attachmentPath(fileName.replace(/\.pptx$/i, ".pdf"), forNotePath);
+					await this.vault.createBinary(pdfPath, pdf);
+					if (this.settings.keepPptx) await this.vault.createBinary(await this.vault.attachmentPath(fileName, forNotePath), bytes);
+					return { vaultPath: pdfPath, converted: true };
+				} catch (err) {
+					const vaultPath = await this.vault.attachmentPath(fileName, forNotePath);
+					await this.vault.createBinary(vaultPath, bytes);
+					return { vaultPath, converted: false, note: `PDF conversion failed (${(err as Error).message}); kept the .pptx` };
+				}
+			}
+		}
+		const vaultPath = await this.vault.attachmentPath(fileName, forNotePath);
+		await this.vault.createBinary(vaultPath, bytes);
+		return { vaultPath, converted: false };
+	}
+
+	/** Converts every .pptx embedded in a note to PDF and repoints the links. Returns how many were converted. */
+	async convertPptxInNote(path: string): Promise<{ converted: number; errors: string[] }> {
+		const converter = await this.pptxConverter();
+		if (!converter) throw new Error("No converter found: install PowerPoint or LibreOffice.");
+		const md = await this.vault.read(path);
+		const names = [...new Set([...md.matchAll(/\[\[(?:[^\]|]*\/)?([^\]|/]+\.pptx)(?:\||\]\])/gi)].map((m) => m[1] ?? "").filter(Boolean))];
+		let converted = 0;
+		const errors: string[] = [];
+		for (const name of names) {
+			const file = this.app.metadataCache.getFirstLinkpathDest(name, path);
+			if (!file) {
+				errors.push(`${name}: file not found`);
+				continue;
+			}
+			try {
+				const bytes = await this.app.vault.readBinary(file);
+				const pdf = await convertPptxToPdf(converter, bytes, file.name);
+				const pdfPath = await this.vault.attachmentPath(file.basename + ".pdf", path);
+				await this.vault.createBinary(pdfPath, pdf);
+				const pdfName = pdfPath.split("/").pop() ?? pdfPath;
+				const target = this.vault.file(path);
+				if (target) await this.app.vault.process(target, (text) => replaceAttachmentRefs(text, file.name, pdfName));
+				if (!this.settings.keepPptx) await this.app.fileManager.trashFile(file);
+				converted++;
+			} catch (err) {
+				errors.push(`${name}: ${(err as Error).message}`);
+			}
+		}
+		return { converted, errors };
+	}
 
 	/** The Canvas course behind a name typed in the picker or stored in a note (alias first, then fuzzy). */
 	canvasCourseFor(name: string): CanvasCourse | undefined {

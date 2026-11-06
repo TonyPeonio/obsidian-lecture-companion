@@ -368,3 +368,9 @@ export function migrateCourseIndex(markdown: string): string {
 	out = out.replace(/\s+$/, "");
 	return out ? `${out}\n` : "";
 }
+
+/** Points every `[[old]]` / `![[old]]` / `[[old|label]]` reference at `next` (file names, not paths). */
+export function replaceAttachmentRefs(markdown: string, oldName: string, newName: string): string {
+	const esc = oldName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	return markdown.replace(new RegExp(`\\[\\[(?:[^\\]|]*/)?${esc}(\\||\\]\\])`, "g"), (_m, tail: string) => `[[${newName}${tail}`);
+}
