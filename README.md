@@ -153,6 +153,13 @@ Click the microphone in the ribbon or run **Lecture Companion: Open panel**.
    - Decks are downloaded once for matching and their text is cached in the plugin folder
      (`slide-cache.json`), so later matches are instant.
 
+### Already have a recording?
+
+Press the **audio file** button in the panel (or run **Transcribe an audio file**), pick the
+recording, and it is transcribed in chunks with the same progress bar, then matched to slides and
+summarized exactly like a live session. The file is copied into the attachment folder and embedded
+in the transcript. Anything Chromium can decode works: webm, m4a, mp3, wav, ogg, flac, mp4.
+
 ### Already have notes from class?
 
 You don't need to re-record anything. **Import this note as a lecture** takes the open note
@@ -181,6 +188,7 @@ already lectures are skipped, so it is safe to run twice.
 |---|---|
 | Open panel | Opens the sidebar panel |
 | Start recording | Opens the panel with the course picker focused |
+| Transcribe an audio file | Pick a recording you already have (webm, m4a, mp3, wav, ogg, mp4…); it goes through the same transcript → slides → summary steps |
 | Pause or resume recording | |
 | Stop recording and write the note | |
 | Pull today's Canvas slides | Fetches today's new PDF/PPTX files from every active course |

@@ -11,7 +11,7 @@ import type LectureCompanionPlugin from "./main";
 import { MicRecorder, TARGET_RATE } from "./recorder";
 import type { NoteTarget } from "./vault";
 
-export type SessionStatus = "idle" | "starting" | "recording" | "paused" | "finishing" | "matching" | "summarizing" | "done" | "error";
+export type SessionStatus = "idle" | "starting" | "recording" | "paused" | "transcribing" | "finishing" | "matching" | "summarizing" | "done" | "error";
 
 const EMPTY_PROGRESS: PipelineProgress = { recordedSec: 0, transcribedSec: 0, queued: 0, busy: false };
 
@@ -76,7 +76,7 @@ export class LectureSession {
 	}
 
 	get isLive(): boolean {
-		return this.status === "recording" || this.status === "paused" || this.status === "starting" || this.status === "finishing" || this.status === "matching";
+		return this.status === "recording" || this.status === "paused" || this.status === "starting" || this.status === "transcribing" || this.status === "finishing" || this.status === "matching";
 	}
 
 	get isBusy(): boolean {
@@ -118,29 +118,7 @@ export class LectureSession {
 			// A second recording of the same lecture appends instead of wiping the first.
 			this.priorTranscript = cleanTranscript((await this.plugin.vault.readSection(this.target, SECTION_TRANSCRIPT)) ?? "", true);
 			const settings = this.plugin.settings;
-			this.pipeline = new TranscriptionPipeline(
-				async (wav, { prompt }) => {
-					const baseUrl = await this.plugin.server.ensureRunning();
-					const result = await transcribeWav(this.plugin.http, baseUrl, wav, {
-						prompt,
-						language: settings.language === "auto" ? undefined : settings.language,
-					});
-					this.plugin.server.touch();
-					return result;
-				},
-				{
-					onSegments: (segs) => {
-						this.segments.push(...segs);
-						for (const l of this.segmentListeners) l(segs);
-					},
-					onProgress: () => this.emit(),
-					onError: (err) => {
-						this.error = `A chunk could not be transcribed: ${err.message}`;
-						this.emit();
-					},
-				},
-				{ sampleRate: TARGET_RATE },
-			);
+			this.pipeline = this.makePipeline();
 			this.chunker = new Chunker({
 				sampleRate: TARGET_RATE,
 				maxChunkSec: Math.max(5, settings.chunkSeconds),
@@ -251,22 +229,7 @@ export class LectureSession {
 				await this.plugin.vault.createBinary(path, await audio.blob.arrayBuffer());
 				this.audioPath = path;
 			}
-			await this.writeTranscript();
-			this.level = 0;
-			if (this.segments.length > 0 && this.target) {
-				this.status = "matching";
-				this.emit();
-				try {
-					await this.plugin.matchSlidesForSession(this.course, this.date, this.target, transcriptToMarkdown(this.segments));
-				} catch (err) {
-					new Notice(`Slide matching failed: ${(err as Error).message}`, 8000);
-				}
-			}
-			if (this.plugin.settings.summarizeOnStop && this.segments.length > 0) {
-				await this.summarize();
-			}
-			this.status = "done";
-			this.emit();
+			await this.finish();
 		} catch (err) {
 			this.status = "error";
 			this.error = (err as Error).message;
@@ -274,6 +237,106 @@ export class LectureSession {
 			throw err;
 		} finally {
 			this.stopping = false;
+		}
+		return this.target;
+	}
+
+	/** Transcription pipeline shared by live recording and file transcription. */
+	private makePipeline(): TranscriptionPipeline {
+	const settings = this.plugin.settings;
+	return new TranscriptionPipeline(
+			async (wav, { prompt }) => {
+				const baseUrl = await this.plugin.server.ensureRunning();
+				const result = await transcribeWav(this.plugin.http, baseUrl, wav, {
+					prompt,
+					language: settings.language === "auto" ? undefined : settings.language,
+				});
+				this.plugin.server.touch();
+				return result;
+			},
+			{
+				onSegments: (segs) => {
+					this.segments.push(...segs);
+					for (const l of this.segmentListeners) l(segs);
+				},
+				onProgress: () => this.emit(),
+				onError: (err) => {
+					this.error = `A chunk could not be transcribed: ${err.message}`;
+					this.emit();
+				},
+			},
+			{ sampleRate: TARGET_RATE },
+		);
+	}
+
+	/** Writes the transcript, matches slides and (optionally) summarizes; ends in "done". */
+	private async finish(): Promise<void> {
+		await this.writeTranscript();
+		this.level = 0;
+		if (this.segments.length > 0 && this.target) {
+			this.status = "matching";
+			this.emit();
+			try {
+				await this.plugin.matchSlidesForSession(this.course, this.date, this.target, transcriptToMarkdown(this.segments));
+			} catch (err) {
+				new Notice(`Slide matching failed: ${(err as Error).message}`, 8000);
+			}
+		}
+		if (this.plugin.settings.summarizeOnStop && this.segments.length > 0) {
+			await this.summarize();
+		}
+		this.status = "done";
+		this.emit();
+	}
+
+	/**
+	 * Transcribes an existing recording (already decoded to 16 kHz mono PCM) through the same
+	 * chunker and pipeline as the microphone, then finishes the note like a live session.
+	 */
+	async transcribeAudio(course: string, date: string, pcm: Float32Array, original?: { name: string; bytes: ArrayBuffer }): Promise<NoteTarget | undefined> {
+		if (this.isBusy) throw new Error("A session is already running");
+		const name = course.trim();
+		if (!name) throw new Error("Choose a course first");
+		this.reset();
+		this.course = name;
+		this.date = date;
+		this.status = "starting";
+		this.emit();
+		try {
+			await this.plugin.startServer();
+			await this.plugin.learnCourseAlias(name);
+			this.target = await this.plugin.ensureLectureNote(name, date);
+			this.priorTranscript = cleanTranscript((await this.plugin.vault.readSection(this.target, SECTION_TRANSCRIPT)) ?? "", true);
+			const settings = this.plugin.settings;
+			this.pipeline = this.makePipeline();
+			this.chunker = new Chunker({ sampleRate: TARGET_RATE, maxChunkSec: Math.max(5, settings.chunkSeconds), silenceCutMs: Math.max(200, settings.silenceCutMs) });
+			this.status = "transcribing";
+			this.emit();
+			// Feed in 100 ms frames so chunk boundaries fall at pauses, exactly like the mic path.
+			const frame = TARGET_RATE / 10;
+			for (let i = 0; i < pcm.length; i += frame) {
+				for (const chunk of this.chunker.push(pcm.subarray(i, Math.min(pcm.length, i + frame)))) this.pipeline.enqueue(chunk);
+			}
+			const last = this.chunker.flush();
+			if (last) this.pipeline.enqueue(last);
+			this.pipeline.setRecorded(this.chunker.recordedSec);
+			this.flushTimer = window.setInterval(() => void this.flushPartial(), 60_000);
+			await this.pipeline.drain();
+			this.clearTimers();
+			if (original && this.target) {
+				const ext = original.name.split(".").pop()?.toLowerCase() || "audio";
+				const stem = original.name.replace(/\.[^.]+$/, "");
+				const path = await this.plugin.vault.attachmentPath(`${safeFileName(stem)}.${ext}`, this.target.path);
+				await this.plugin.vault.createBinary(path, original.bytes);
+				this.audioPath = path;
+			}
+			await this.finish();
+		} catch (err) {
+			this.clearTimers();
+			this.status = "error";
+			this.error = (err as Error).message;
+			this.emit();
+			throw err;
 		}
 		return this.target;
 	}

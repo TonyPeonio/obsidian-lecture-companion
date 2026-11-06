@@ -1,6 +1,7 @@
 import { ItemView, MarkdownRenderer, Notice, setIcon, type WorkspaceLeaf } from "obsidian";
 import type { TranscriptSegment } from "./core/audio/pipeline";
 import { formatTimestamp, toISODate } from "./core/notes";
+import { decodeAudioFile } from "./recorder";
 import type LectureCompanionPlugin from "./main";
 import type { ServerState } from "./core/whisper/server";
 
@@ -14,6 +15,8 @@ export class LectureView extends ItemView {
 	private pauseBtn!: HTMLButtonElement;
 	private stopBtn!: HTMLButtonElement;
 	private newBtn!: HTMLButtonElement;
+	private fileBtn!: HTMLButtonElement;
+	private fileInput!: HTMLInputElement;
 	private serverPill!: HTMLElement;
 	private levelMeter!: HTMLProgressElement;
 	private progressBar!: HTMLProgressElement;
@@ -63,6 +66,9 @@ export class LectureView extends ItemView {
 		this.pauseBtn = iconButton(buttons, "pause", "Pause", () => this.togglePause());
 		this.stopBtn = iconButton(buttons, "square", "Stop and write the note", () => void this.stopRecording());
 		this.newBtn = iconButton(buttons, "file-plus", "New recording (clear the panel for the next class)", () => this.newRecording());
+		this.fileInput = root.createEl("input", { type: "file", cls: "lc-file-input", attr: { accept: "audio/*,video/*,.webm,.m4a,.mp3,.wav,.ogg,.opus,.flac,.aac,.mp4" } });
+		this.fileInput.addEventListener("change", () => void this.transcribeChosenFile());
+		this.fileBtn = iconButton(buttons, "file-audio", "Transcribe an audio file (a recording you already have)", () => this.pickAudioFile());
 		iconButton(buttons, "download", "Pull slides from Canvas for this date", () => void this.pullSlides());
 		iconButton(buttons, "sparkles", "Summarize", () => void this.summarize());
 		iconButton(buttons, "file-text", "Open lecture note", () => void this.openNote());
@@ -130,6 +136,39 @@ export class LectureView extends ItemView {
 			await session.start(course, this.dateInput.value || toISODate());
 		} catch (err) {
 			new Notice(`Could not start: ${(err as Error).message}`, 8000);
+		}
+	}
+
+	/** Opens the OS file picker for an existing recording (used by the panel button and the command). */
+	pickAudioFile(): void {
+		if (this.plugin.session.isBusy) {
+			new Notice("Wait for the current session to finish.");
+			return;
+		}
+		this.fileInput.value = "";
+		this.fileInput.click();
+	}
+
+	private async transcribeChosenFile(): Promise<void> {
+		const file = this.fileInput.files?.[0];
+		if (!file) return;
+		const course = this.courseInput.value.trim();
+		if (!course) {
+			new Notice("Type or choose a course first.");
+			this.courseInput.focus();
+			return;
+		}
+		this.rebuildTranscript();
+		const notice = new Notice(`Decoding ${file.name}…`, 0);
+		try {
+			const bytes = await file.arrayBuffer();
+			const pcm = await decodeAudioFile(bytes);
+			notice.hide();
+			const target = await this.plugin.session.transcribeAudio(course, this.dateInput.value || toISODate(), pcm, { name: file.name, bytes });
+			if (target) new Notice(`Lecture note written: ${target.path}`);
+		} catch (err) {
+			notice.hide();
+			new Notice(`Could not transcribe ${file.name}: ${(err as Error).message}`, 10_000);
 		}
 	}
 
@@ -206,6 +245,7 @@ export class LectureView extends ItemView {
 
 		this.recordBtn.toggleClass("is-hidden", live || session.status === "summarizing");
 		this.newBtn.toggleClass("is-hidden", !(session.status === "done" || session.status === "error"));
+		this.fileBtn.toggleClass("is-hidden", live || session.status === "summarizing");
 		this.pauseBtn.toggleClass("is-hidden", !(session.status === "recording" || session.status === "paused"));
 		this.stopBtn.toggleClass("is-hidden", !(session.status === "recording" || session.status === "paused"));
 		setIcon(this.pauseBtn, session.status === "paused" ? "play" : "pause");
@@ -305,6 +345,8 @@ function statusLabel(status: string, course: string, date: string): string {
 			return `Recording${where}`;
 		case "paused":
 			return `Paused${where}`;
+		case "transcribing":
+			return `Transcribing file${where}`;
 		case "finishing":
 			return `Finishing transcript${where}`;
 		case "matching":

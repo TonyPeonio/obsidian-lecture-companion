@@ -112,6 +112,15 @@ export default class LectureCompanionPlugin extends Plugin {
 			},
 		});
 		this.addCommand({
+			id: "transcribe-audio-file",
+			name: "Transcribe an audio file",
+			checkCallback: (checking) => {
+				if (this.session.isBusy) return false;
+				if (!checking) void this.activateView().then((view) => view?.pickAudioFile());
+				return true;
+			},
+		});
+		this.addCommand({
 			id: "pull-canvas-slides",
 			name: "Pull today's Canvas slides",
 			callback: () => void this.pullSlidesCommand(toISODate()),

@@ -29,6 +29,7 @@
 	gap: var(--size-2-2);
 }
 
+.lc-file-input,
 .lc-btn.is-hidden,
 .lc-error.is-hidden,
 .lc-download.is-hidden {
