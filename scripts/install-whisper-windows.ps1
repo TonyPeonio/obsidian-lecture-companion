@@ -45,5 +45,9 @@ $exe = Join-Path $dest "whisper-server.exe"
 if (-not (Test-Path $exe)) { throw "whisper-server.exe not found in $dest" }
 Write-Host ""
 Write-Host "Installed: $exe"
-if ($Cuda) { Write-Host "GPU build. In the plugin settings set the binary path to the path above (a Scoop CPU install would otherwise be found first), then click Detect." }
-& $exe --help 2>&1 | Select-Object -First 2
+Write-Host "Back in Obsidian, click Detect, then Start. You can close this window."
+# Show the first lines whisper-server prints (on a GPU build this includes the CUDA device it found).
+# Native programs write to stderr, which PowerShell would otherwise report as an error.
+$ErrorActionPreference = "Continue"
+$banner = & $exe --help 2>&1 | ForEach-Object { "$_" } | Where-Object { $_ -match "\S" } | Select-Object -First 3
+if ($banner) { Write-Host ""; Write-Host "whisper-server says:"; $banner | ForEach-Object { Write-Host "  $_" } }

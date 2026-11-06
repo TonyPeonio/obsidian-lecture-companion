@@ -271,7 +271,8 @@ export class LectureSession {
 	/** Summarizes the current session's transcript (or the target note's sections) into the Summary section. */
 	async summarize(target: NoteTarget | undefined = this.target): Promise<string> {
 		if (!target) throw new Error("No lecture note to summarize");
-		if (this.isLive) throw new Error("Stop the recording first");
+		// `stop()` calls this while "finishing"; only an active capture must be stopped first.
+		if (this.status === "recording" || this.status === "paused" || this.status === "starting") throw new Error("Stop the recording first");
 		this.status = "summarizing";
 		this.summary = "";
 		this.error = undefined;
