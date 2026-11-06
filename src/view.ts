@@ -1,4 +1,4 @@
-import { ItemView, MarkdownRenderer, Notice, setIcon, type WorkspaceLeaf } from "obsidian";
+import { type App, ItemView, MarkdownRenderer, Modal, Notice, setIcon, type WorkspaceLeaf } from "obsidian";
 import type { TranscriptSegment } from "./core/audio/pipeline";
 import { formatTimestamp, toISODate } from "./core/notes";
 import { decodeAudioFile } from "./recorder";
@@ -16,6 +16,8 @@ export class LectureView extends ItemView {
 	private stopBtn!: HTMLButtonElement;
 	private newBtn!: HTMLButtonElement;
 	private fileBtn!: HTMLButtonElement;
+	private pasteBtn!: HTMLButtonElement;
+	private noteBtn!: HTMLButtonElement;
 	private fileInput!: HTMLInputElement;
 	private serverPill!: HTMLElement;
 	private levelMeter!: HTMLProgressElement;
@@ -69,6 +71,8 @@ export class LectureView extends ItemView {
 		this.fileInput = root.createEl("input", { type: "file", cls: "lc-file-input", attr: { accept: "audio/*,video/*,.webm,.m4a,.mp3,.wav,.ogg,.opus,.flac,.aac,.mp4" } });
 		this.fileInput.addEventListener("change", () => void this.transcribeChosenFile());
 		this.fileBtn = iconButton(buttons, "file-audio", "Transcribe an audio file (a recording you already have)", () => this.pickAudioFile());
+		this.pasteBtn = iconButton(buttons, "clipboard-paste", "Paste notes you already have (text) and turn them into a lecture", () => void this.pasteNotes());
+		this.noteBtn = iconButton(buttons, "file-input", "Import the open note as a lecture", () => void this.plugin.importActiveNote());
 		iconButton(buttons, "download", "Pull slides from Canvas for this date", () => void this.pullSlides());
 		iconButton(buttons, "sparkles", "Summarize", () => void this.summarize());
 		iconButton(buttons, "file-text", "Open lecture note", () => void this.openNote());
@@ -172,6 +176,21 @@ export class LectureView extends ItemView {
 		}
 	}
 
+	/** Paste box for notes that exist only as text (another app, an old file, a chat export). */
+	private async pasteNotes(): Promise<void> {
+		if (this.plugin.session.isBusy) {
+			new Notice("Wait for the current session to finish.");
+			return;
+		}
+		const text = await new PasteModal(this.app).ask();
+		if (!text) return;
+		await this.plugin.importText(text, {
+			sourceName: "pasted notes",
+			course: this.courseInput.value.trim(),
+			date: this.dateInput.value || toISODate(),
+		});
+	}
+
 	/** Clears the finished session so the panel is ready for the next class. The note is already written. */
 	private newRecording(): void {
 		const session = this.plugin.session;
@@ -246,6 +265,8 @@ export class LectureView extends ItemView {
 		this.recordBtn.toggleClass("is-hidden", live || session.status === "summarizing");
 		this.newBtn.toggleClass("is-hidden", !(session.status === "done" || session.status === "error"));
 		this.fileBtn.toggleClass("is-hidden", live || session.status === "summarizing");
+		this.pasteBtn.toggleClass("is-hidden", live || session.status === "summarizing");
+		this.noteBtn.toggleClass("is-hidden", live || session.status === "summarizing");
 		this.pauseBtn.toggleClass("is-hidden", !(session.status === "recording" || session.status === "paused"));
 		this.stopBtn.toggleClass("is-hidden", !(session.status === "recording" || session.status === "paused"));
 		setIcon(this.pauseBtn, session.status === "paused" ? "play" : "pause");
@@ -359,5 +380,53 @@ function statusLabel(status: string, course: string, date: string): string {
 			return `Error${where}`;
 		default:
 			return "Ready";
+	}
+}
+
+class PasteModal extends Modal {
+	private resolve?: (text: string | null) => void;
+
+	constructor(app: App) {
+		super(app);
+	}
+
+	ask(): Promise<string | null> {
+		this.open();
+		return new Promise((resolve) => {
+			this.resolve = resolve;
+		});
+	}
+
+	onOpen(): void {
+		this.modalEl.addClass("lc-paste-modal");
+		this.titleEl.setText("Paste your notes");
+		this.contentEl.createEl("p", {
+			cls: "lc-picker-hint",
+			text: "Paste the notes for one lecture, or a whole run of dated entries (\"Lecture 2 - 8.26.26 …\"): several dates open the split preview. Next you choose the course and date, then the deck is matched and a summary written from the notes.",
+		});
+		const area = this.contentEl.createEl("textarea", { cls: "lc-paste-area", attr: { placeholder: "Paste here…", spellcheck: "false" } });
+		const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+		const ok = buttons.createEl("button", { text: "Continue", cls: "mod-cta" });
+		ok.addEventListener("click", () => {
+			if (!area.value.trim()) {
+				new Notice("Nothing pasted yet.");
+				return;
+			}
+			this.finish(area.value);
+		});
+		buttons.createEl("button", { text: "Cancel" }).addEventListener("click", () => this.finish(null));
+		window.setTimeout(() => area.focus(), 0);
+	}
+
+	onClose(): void {
+		this.resolve?.(null);
+		this.resolve = undefined;
+		this.contentEl.empty();
+	}
+
+	private finish(text: string | null): void {
+		this.resolve?.(text);
+		this.resolve = undefined;
+		this.close();
 	}
 }

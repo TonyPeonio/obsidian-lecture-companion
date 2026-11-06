@@ -162,7 +162,9 @@ in the transcript. Anything Chromium can decode works: webm, m4a, mp3, wav, ogg,
 
 ### Already have notes from class?
 
-You don't need to re-record anything. **Import this note as a lecture** takes the open note
+You don't need to re-record anything. In the panel, the **paste** button takes text from
+anywhere (another app, a chat export) and the **import note** button takes the note that is open;
+the same two actions exist as commands. **Import this note as a lecture** takes the open note
 (or just the selected text), asks for the course and date (pre-filled from the file name when it
 contains one), and creates `Courses/<course>/<date>.md` in the lecture layout with your text
 under *My notes*. It then matches the deck against your notes instead of a transcript and

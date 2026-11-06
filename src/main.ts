@@ -359,33 +359,38 @@ export default class LectureCompanionPlugin extends Plugin {
 		if (!file) return;
 		const md = await this.app.vault.cachedRead(file);
 		const text = selection?.trim() || stripFrontmatter(md);
-		if (!text.trim()) {
-			new Notice("The note is empty.");
-			return;
-		}
 		const parts = file.path.split("/");
 		const folderName = parts.length >= 2 ? (parts[parts.length - 2] ?? "") : "";
-		const guessCourse = this.courseNames().find((c) => c === folderName) ?? "";
+		await this.importText(text, {
+			sourceName: file.basename,
+			sourcePath: selection ? undefined : file.path,
+			course: this.courseNames().find((c) => c === folderName) ?? "",
+			date: detectDate(file.basename) ?? detectDate(md.slice(0, 400)) ?? toISODate(new Date(file.stat.ctime)),
+			forceSplit,
+		});
+	}
 
+	/** Shared by the open-note import and the panel's paste box. */
+	async importText(text: string, opts: { sourceName: string; sourcePath?: string; course: string; date: string; forceSplit?: boolean }): Promise<void> {
+		if (!text.trim()) {
+			new Notice("There is no text to import.");
+			return;
+		}
 		const entries = splitEntries(text);
 		const datedEntries = entries.filter((e) => e.date && !e.inherited).length;
-		if (forceSplit || datedEntries >= 2) {
-			const choice = await new SplitModal(this.app, this, file.basename, entries, { course: guessCourse }).ask();
+		if (opts.forceSplit || datedEntries >= 2) {
+			const choice = await new SplitModal(this.app, this, opts.sourceName, entries, { course: opts.course }).ask();
 			if (choice === null) return;
 			if (choice !== "single") {
 				await this.importSplit(choice);
 				return;
 			}
 		}
-
-		const choice = await new ImportModal(this.app, this, `Import "${file.basename}" as a lecture`, {
-			course: guessCourse,
-			date: detectDate(file.basename) ?? detectDate(md.slice(0, 400)) ?? toISODate(new Date(file.stat.ctime)),
-		}).ask();
+		const choice = await new ImportModal(this.app, this, `Import "${opts.sourceName}" as a lecture`, { course: opts.course, date: opts.date }).ask();
 		if (!choice) return;
 		const notice = new Notice("Importing…", 0);
 		try {
-			const result = await importNotesAsLecture(this, { ...choice, text, sourcePath: selection ? undefined : file.path });
+			const result = await importNotesAsLecture(this, { ...choice, text, sourcePath: opts.sourcePath });
 			notice.hide();
 			new Notice(`${result.created ? "Created" : "Updated"} ${result.target.path}${result.summarized ? " with a summary" : ""}.`, 8000);
 			await this.vault.open(result.target.path);
