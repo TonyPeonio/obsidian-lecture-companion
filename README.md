@@ -162,6 +162,14 @@ under *My notes*. It then matches the deck against your notes instead of a trans
 writes the summary from notes + slide text. If the open note already sits at the lecture path,
 it is upgraded in place; otherwise your original is left untouched.
 
+**One file with the whole semester in it?** If the note holds several dated entries (headers
+like `Lecture 2 - 8.26.26`, `Meeting with Caleb - 9/11/2026`, `## Week 3: trees`), *Import this
+note* opens a split preview instead: one row per entry with its detected date, an include box
+and an editable date. Entries on the same day merge into one lecture note; headers without a
+date assume the previous entry's date (marked, so you can correct them); text before the first
+header is skipped unless you give it a date. *Split this note into lectures* opens the same
+preview on demand.
+
 **Import all notes in this folder as lectures** does the same for every note in the active
 note's folder: one course, dates from the file names (`2026-11-05`, `11-05-2026`, `Nov 5 2026`
 all work; otherwise the file's creation date), slide matching set to automatic. Notes that are

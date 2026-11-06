@@ -235,6 +235,34 @@
 	accent-color: var(--interactive-accent);
 }
 
+/* Split preview */
+.lc-split-modal {
+	width: min(760px, 94vw);
+}
+
+.lc-split-list {
+	max-height: 50vh;
+	overflow-y: auto;
+	display: flex;
+	flex-direction: column;
+	gap: var(--size-2-2);
+	margin-bottom: var(--size-4-2);
+}
+
+.lc-split-row {
+	display: grid;
+	grid-template-columns: auto 1fr auto;
+	gap: var(--size-4-2);
+	align-items: center;
+	padding: var(--size-2-3) var(--size-4-2);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+}
+
+.lc-split-date {
+	width: 10em;
+}
+
 /* Import dialog */
 .lc-import-form {
 	display: grid;

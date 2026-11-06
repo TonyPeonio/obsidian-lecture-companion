@@ -4,6 +4,8 @@ import { CanvasClient, resolveCourse, type CanvasCourse } from "./core/canvas";
 import type { HttpRequest } from "./core/http";
 import { courseNotePath, dateHeading, detectDate, lectureNotePath, renderLectureNote, SECTION_SLIDES, SECTION_TRANSCRIPT, stripFrontmatter, toISODate } from "./core/notes";
 import { ImportModal, importNotesAsLecture, listImportableNotes } from "./import";
+import { groupEntriesByDate, splitEntries } from "./core/split";
+import { SplitModal, type SplitChoice } from "./split-modal";
 import { SlideMatcher } from "./slide-matcher";
 import { OllamaClient } from "./core/ollama";
 import { locateWhisperServer } from "./core/whisper/locate";
@@ -131,6 +133,16 @@ export default class LectureCompanionPlugin extends Plugin {
 					const editor = this.app.workspace.activeEditor?.editor;
 					void this.importActiveNote(editor?.getSelection() || undefined);
 				}
+				return true;
+			},
+		});
+		this.addCommand({
+			id: "split-note",
+			name: "Split this note into lectures (one per date)",
+			checkCallback: (checking) => {
+				const file = this.app.workspace.getActiveFile();
+				if (!(file instanceof TFile) || file.extension !== "md" || this.session.isBusy) return false;
+				if (!checking) void this.importActiveNote(undefined, true);
 				return true;
 			},
 		});
@@ -332,8 +344,8 @@ export default class LectureCompanionPlugin extends Plugin {
 		}
 	}
 
-	/** "Import this note as a lecture": the open note (or selection) becomes My notes of a lecture note. */
-	async importActiveNote(selection?: string): Promise<void> {
+	/** "Import this note as a lecture": the open note (or selection) becomes My notes of a lecture note. A note holding several dated entries is offered for splitting. */
+	async importActiveNote(selection?: string, forceSplit = false): Promise<void> {
 		const file = this.app.workspace.getActiveFile();
 		if (!file) return;
 		const md = await this.app.vault.cachedRead(file);
@@ -345,6 +357,18 @@ export default class LectureCompanionPlugin extends Plugin {
 		const parts = file.path.split("/");
 		const folderName = parts.length >= 2 ? (parts[parts.length - 2] ?? "") : "";
 		const guessCourse = this.courseNames().find((c) => c === folderName) ?? "";
+
+		const entries = splitEntries(text);
+		const datedEntries = entries.filter((e) => e.date && !e.inherited).length;
+		if (forceSplit || datedEntries >= 2) {
+			const choice = await new SplitModal(this.app, this, file.basename, entries, { course: guessCourse }).ask();
+			if (choice === null) return;
+			if (choice !== "single") {
+				await this.importSplit(choice);
+				return;
+			}
+		}
+
 		const choice = await new ImportModal(this.app, this, `Import "${file.basename}" as a lecture`, {
 			course: guessCourse,
 			date: detectDate(file.basename) ?? detectDate(md.slice(0, 400)) ?? toISODate(new Date(file.stat.ctime)),
@@ -360,6 +384,25 @@ export default class LectureCompanionPlugin extends Plugin {
 			notice.hide();
 			new Notice(`Import failed: ${(err as Error).message}`, 10_000);
 		}
+	}
+
+	/** Imports the entries of a split note, one lecture per date (same-day entries merged). */
+	private async importSplit(choice: SplitChoice): Promise<void> {
+		const groups = groupEntriesByDate(choice.entries);
+		const notice = new Notice("Importing…", 0);
+		let done = 0;
+		const failures: string[] = [];
+		for (const g of groups) {
+			notice.setMessage(`Importing ${g.date} (${done + 1}/${groups.length})…`);
+			try {
+				await importNotesAsLecture(this, { course: choice.course, date: g.date, text: g.text, matchSlides: choice.matchSlides, summarize: choice.summarize });
+				done++;
+			} catch (err) {
+				failures.push(`${g.date}: ${(err as Error).message}`);
+			}
+		}
+		notice.hide();
+		new Notice(`Imported ${done} of ${groups.length} lectures into ${this.settings.courseFolder}/${choice.course}.${failures.length ? ` Failed: ${failures.join("; ")}` : ""}`, 12_000);
 	}
 
 	/** "Import all notes in this folder": every non-lecture note in the active note's folder, one course, dates from file names. */
