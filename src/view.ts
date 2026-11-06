@@ -13,6 +13,7 @@ export class LectureView extends ItemView {
 	private recordBtn!: HTMLButtonElement;
 	private pauseBtn!: HTMLButtonElement;
 	private stopBtn!: HTMLButtonElement;
+	private newBtn!: HTMLButtonElement;
 	private serverPill!: HTMLElement;
 	private levelMeter!: HTMLProgressElement;
 	private progressBar!: HTMLProgressElement;
@@ -61,6 +62,7 @@ export class LectureView extends ItemView {
 		this.recordBtn.addClass("mod-cta");
 		this.pauseBtn = iconButton(buttons, "pause", "Pause", () => this.togglePause());
 		this.stopBtn = iconButton(buttons, "square", "Stop and write the note", () => void this.stopRecording());
+		this.newBtn = iconButton(buttons, "file-plus", "New recording (clear the panel for the next class)", () => this.newRecording());
 		iconButton(buttons, "download", "Pull slides from Canvas for this date", () => void this.pullSlides());
 		iconButton(buttons, "sparkles", "Summarize", () => void this.summarize());
 		iconButton(buttons, "file-text", "Open lecture note", () => void this.openNote());
@@ -131,6 +133,18 @@ export class LectureView extends ItemView {
 		}
 	}
 
+	/** Clears the finished session so the panel is ready for the next class. The note is already written. */
+	private newRecording(): void {
+		const session = this.plugin.session;
+		if (session.isBusy) return;
+		session.reset();
+		this.courseInput.value = "";
+		this.dateInput.value = toISODate();
+		this.rebuildTranscript();
+		this.render();
+		this.courseInput.focus();
+	}
+
 	private togglePause(): void {
 		const session = this.plugin.session;
 		if (session.status === "recording") session.pause();
@@ -191,6 +205,7 @@ export class LectureView extends ItemView {
 		const live = session.isLive;
 
 		this.recordBtn.toggleClass("is-hidden", live || session.status === "summarizing");
+		this.newBtn.toggleClass("is-hidden", !(session.status === "done" || session.status === "error"));
 		this.pauseBtn.toggleClass("is-hidden", !(session.status === "recording" || session.status === "paused"));
 		this.stopBtn.toggleClass("is-hidden", !(session.status === "recording" || session.status === "paused"));
 		setIcon(this.pauseBtn, session.status === "paused" ? "play" : "pause");
