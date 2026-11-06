@@ -13,7 +13,7 @@ import { cleanTranscript } from "./session";
 import type { NoteTarget } from "./vault";
 import { SlidePickerModal } from "./slide-picker";
 
-const MAX_CANDIDATES = 40;
+const MAX_CANDIDATES = 120;
 const CACHE_LIMIT = 600;
 
 interface CacheEntry {
