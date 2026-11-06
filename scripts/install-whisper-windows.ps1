@@ -9,6 +9,7 @@ param(
     [switch]$Cuda
 )
 $ErrorActionPreference = "Stop"
+try { $host.UI.RawUI.WindowTitle = "whisper.cpp installer" } catch { }
 $release = "b5454"
 if ($Cuda) {
     $asset = "whisper-bin-win-cuda-12.4.0-x64.zip"   # needs an NVIDIA driver that supports CUDA 12.4 (any 2024+ driver)

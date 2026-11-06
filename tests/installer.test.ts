@@ -16,10 +16,12 @@ describe("installer", () => {
 		expect(INSTALL_SCRIPT_WINDOWS).toContain("https://github.com/ggml-org/whisper.cpp/releases/download/");
 	});
 
-	it("opens a visible PowerShell window and passes -Cuda only for the GPU build", () => {
+	it("starts PowerShell directly (no cmd quoting) and passes -Cuda only for the GPU build", () => {
 		const cpu = installerArgs("C:\\v\\.obsidian\\plugins\\lecture-companion\\install-whisper-windows.ps1", "cpu");
-		expect(cpu.command).toBe("cmd.exe");
-		expect(cpu.args).toEqual(["/c", "start", '"whisper.cpp installer"', "powershell", "-NoExit", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "C:\\v\\.obsidian\\plugins\\lecture-companion\\install-whisper-windows.ps1"]);
+		expect(cpu.command).toBe("powershell.exe");
+		expect(cpu.args).toEqual(["-NoExit", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "C:\\v\\.obsidian\\plugins\\lecture-companion\\install-whisper-windows.ps1"]);
+		expect(cpu.args.some((a) => a.includes('"'))).toBe(false);
 		expect(installerArgs("x.ps1", "cuda").args.slice(-2)).toEqual(["x.ps1", "-Cuda"]);
+		expect(INSTALL_SCRIPT_WINDOWS).toContain('WindowTitle = "whisper.cpp installer"');
 	});
 });

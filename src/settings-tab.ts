@@ -86,7 +86,8 @@ export class LectureCompanionSettingTab extends PluginSettingTab {
 			.setName("Model")
 			.setDesc("Downloaded once from huggingface.co (ggerganov/whisper.cpp) into the plugin folder and verified by SHA-256.");
 		modelSetting.addDropdown((d) => {
-			for (const m of WHISPER_MODELS) d.addOption(m.id, `${m.id} — ${m.note}`);
+			d.selectEl.addClass("lc-model-select");
+			for (const m of WHISPER_MODELS) d.addOption(m.id, `${m.id} (${formatBytes(m.bytes)})`);
 			d.setValue(s.whisperModel).onChange(async (v) => {
 				s.whisperModel = v;
 				await save();
@@ -106,7 +107,7 @@ export class LectureCompanionSettingTab extends PluginSettingTab {
 				return;
 			}
 			const installed = await isModelInstalled(this.plugin.modelsDir, entry, nodeDownloadDeps());
-			modelStatus.setText(installed ? `Installed: ${entry.file} (${formatBytes(entry.bytes)})` : `Not downloaded (${formatBytes(entry.bytes)}).`);
+			modelStatus.setText(`${entry.note}. ${installed ? "Installed." : `Not downloaded yet (${formatBytes(entry.bytes)}).`}`);
 			modelStatus.toggleClass("lc-ok", installed);
 		};
 		void refreshModelStatus();

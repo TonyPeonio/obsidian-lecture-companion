@@ -80,8 +80,7 @@
 }
 
 .lc-level,
-.lc-progress,
-.lc-download {
+.lc-progress {
 	flex: 1 1 auto;
 	width: 100%;
 	height: 6px;
@@ -167,7 +166,20 @@
 .lc-setting-result {
 	margin-top: var(--size-2-2);
 	color: var(--text-muted);
-	word-break: break-all;
+	overflow-wrap: anywhere;
+}
+
+/* Keep wide controls from squeezing the name/description column to nothing. */
+.lc-model-select {
+	max-width: 16em;
+}
+
+.lc-download {
+	display: block;
+	margin-top: var(--size-2-2);
+	height: 6px;
+	width: 100%;
+	accent-color: var(--interactive-accent);
 }
 
 .lc-setting-result.lc-ok {
