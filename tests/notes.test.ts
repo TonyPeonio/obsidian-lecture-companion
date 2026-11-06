@@ -137,6 +137,8 @@ describe("settings helpers", () => {
 		const s = { ...DEFAULT_SETTINGS };
 		expect(vaultCourseName(s, canvas)).toBe("CSCI-578-A");
 		expect(vaultCourseName(s, { id: 1, name: "No Code" })).toBe("No Code");
+		expect(addCourseAlias(s, canvas, canvas.name)).toBe(false);
+		expect(addCourseAlias(s, canvas, "csci-578-a")).toBe(false);
 		expect(addCourseAlias(s, canvas, "CSCI578")).toBe(true);
 		expect(s.courseAliases).toBe("777 = CSCI578");
 		expect(addCourseAlias(s, canvas, "Other")).toBe(false);

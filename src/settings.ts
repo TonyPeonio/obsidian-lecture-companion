@@ -144,8 +144,11 @@ export function vaultCourseName(settings: LectureCompanionSettings, course: { id
 /** Adds `id = alias` unless the course already has an alias. Returns true when settings changed. */
 export function addCourseAlias(settings: LectureCompanionSettings, course: { id: number; name: string; courseCode?: string }, alias: string): boolean {
 	const keys = [String(course.id), course.name, course.courseCode ?? ""].filter(Boolean).map((k) => k.toLowerCase());
+	const wanted = alias.trim();
+	// Typing Canvas's own name or code carries no preference; only a different name is worth remembering.
+	if (!wanted || keys.includes(wanted.toLowerCase())) return false;
 	if (parseKeyValueLines(settings.courseAliases).some((e) => keys.includes(e.key))) return false;
-	const line = `${course.id} = ${alias.trim()}`;
+	const line = `${course.id} = ${wanted}`;
 	settings.courseAliases = settings.courseAliases.trim() ? `${settings.courseAliases.trim()}\n${line}` : line;
 	return true;
 }
