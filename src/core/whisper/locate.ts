@@ -24,6 +24,8 @@ export function candidatePaths(deps: LocateDeps): string[] {
 	if (deps.platform === "win32") {
 		const scoop = deps.env.SCOOP ?? `${home}\\scoop`;
 		out.push(
+			// The plugin's own installer writes here, so it wins over an older Scoop copy.
+			`${deps.env.LOCALAPPDATA ?? `${home}\\AppData\\Local`}\\whisper.cpp\\${bin}`,
 			`${scoop}\\shims\\${bin}`,
 			`${scoop}\\apps\\whisper-cpp\\current\\${bin}`,
 			`${scoop}\\apps\\whisper-cpp\\current\\Release\\${bin}`,
@@ -33,7 +35,6 @@ export function candidatePaths(deps: LocateDeps): string[] {
 			`${home}\\whisper.cpp\\build\\bin\\Release\\${bin}`,
 			`C:\\whisper.cpp\\${bin}`,
 			`C:\\whisper.cpp\\Release\\${bin}`,
-			`${deps.env.LOCALAPPDATA ?? `${home}\\AppData\\Local`}\\whisper.cpp\\${bin}`,
 		);
 	} else {
 		out.push(

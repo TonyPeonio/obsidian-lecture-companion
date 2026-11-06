@@ -36,6 +36,41 @@ export function defaultThreads(): number {
 	return Math.max(4, Math.floor(logical / 2));
 }
 
+export interface GpuInfo {
+	vendor: "nvidia" | "apple" | "none";
+	name?: string;
+}
+
+/** NVIDIA via nvidia-smi (Windows/Linux); Apple silicon uses Metal through the Homebrew build automatically. */
+export async function detectGpu(): Promise<GpuInfo> {
+	if (process.platform === "darwin") return { vendor: process.arch === "arm64" ? "apple" : "none" };
+	const smi = process.platform === "win32" ? `${process.env.SystemRoot ?? "C:\\Windows"}\\System32\\nvidia-smi.exe` : await which("nvidia-smi");
+	if (!smi || !(await exists(smi))) return { vendor: "none" };
+	const name = await new Promise<string>((resolve) => {
+		let out = "";
+		try {
+			const child = spawn(smi, ["--query-gpu=name", "--format=csv,noheader"], { windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
+			child.stdout?.on("data", (d: Buffer) => (out += d.toString()));
+			child.on("error", () => resolve(""));
+			child.on("close", () => resolve(out.split(/\r?\n/)[0]?.trim() ?? ""));
+		} catch {
+			resolve("");
+		}
+	});
+	return name ? { vendor: "nvidia", name } : { vendor: "none" };
+}
+
+/** Writes the installer script next to the plugin and opens it in a visible PowerShell window. */
+export async function runWindowsInstaller(scriptDir: string, scriptText: string, args: (scriptPath: string) => { command: string; args: string[] }): Promise<string> {
+	await fs.mkdir(scriptDir, { recursive: true });
+	const scriptPath = `${scriptDir.replace(/[\\/]+$/, "")}\\install-whisper-windows.ps1`;
+	await fs.writeFile(scriptPath, scriptText, "utf8");
+	const { command, args: argv } = args(scriptPath);
+	const child = spawn(command, argv, { windowsHide: false, detached: true, stdio: "ignore" });
+	child.unref();
+	return scriptPath;
+}
+
 export function nodeLocateDeps(): LocateDeps {
 	return {
 		platform: process.platform,

@@ -53,7 +53,14 @@ app folder on Windows; `/opt/homebrew/bin`, `/usr/local/bin`, `~/.local/bin` and
 
 ### Windows
 
-**Option A — the install script (no package manager needed).** Download
+**Option A — from inside Obsidian.** Settings → Lecture Companion → *Install whisper.cpp*.
+The plugin checks for an NVIDIA GPU and offers **Install GPU build** (CUDA, 10× faster) or
+**Install CPU build**. Clicking one opens a PowerShell window that runs the same script as
+option B, where you can watch it download the official release, verify the checksum and
+unpack it to `%LOCALAPPDATA%\whisper.cpp`. When it prints *Installed*, click **Detect**. The
+GPU option also adds `-fa` (flash attention) to the server arguments for you.
+
+**Option B — the install script by hand (no package manager needed).** Download
 [`scripts/install-whisper-windows.ps1`](scripts/install-whisper-windows.ps1) from this
 repository, then run it from a **Command Prompt or PowerShell** window:
 
@@ -67,20 +74,21 @@ checks its SHA-256, and unpacks it to `%LOCALAPPDATA%\whisper.cpp`. The last lin
 `Installed: …\whisper-server.exe` and the program's usage text. Read the script first if you
 like: it is 30 lines.
 
-**Option B — by hand.** Download `whisper-bin-x64.zip` from the
+**Option C — by hand.** Download `whisper-bin-x64.zip` from the
 [whisper.cpp releases page](https://github.com/ggml-org/whisper.cpp/releases) (pick a release
 that lists Windows zip files; the plain `vX.Y.Z` tags have no files, the `bNNNN` build tags do).
 Unzip it, and either move the contents of its `Release` folder to
 `C:\Users\<you>\AppData\Local\whisper.cpp`, or paste the full path of `whisper-server.exe` into
 the plugin's *whisper-server binary* setting.
 
-**Option C — Scoop.** If you already use [Scoop](https://scoop.sh): `scoop install whisper-cpp`.
+**Option D — Scoop.** If you already use [Scoop](https://scoop.sh): `scoop install whisper-cpp`.
 If Windows says *"'scoop' is not recognized"*, Scoop is not installed; use option A instead.
 
 **Have an NVIDIA card?** Use the CUDA build; it transcribes 10× faster than the CPU build and
-`large-v3-turbo` runs many times faster than real time. Run the script with `-Cuda`
-(it downloads the 650 MB `whisper-bin-win-cuda-12.4.0-x64.zip`, which bundles the CUDA
-runtime; any NVIDIA driver from 2024 or later works):
+`large-v3-turbo` runs many times faster than real time. Option A offers it automatically when
+it detects the GPU; with the script, pass `-Cuda` (it downloads the 650 MB
+`whisper-bin-win-cuda-12.4.0-x64.zip`, which bundles the CUDA runtime; any NVIDIA driver from
+2024 or later works):
 
 ```
 powershell -NoProfile -ExecutionPolicy Bypass -File "%USERPROFILE%\Downloads\install-whisper-windows.ps1" -Cuda
@@ -219,7 +227,11 @@ settings; do not sync that folder to places you do not trust.
 
 The plugin **runs a local program**: `whisper-server` from whisper.cpp, at a path you install
 or choose. It is started with the arguments above and nothing else; it listens on localhost
-only. The plugin never downloads or updates executables.
+only. The plugin never downloads or updates executables itself. On Windows it can open a
+PowerShell window running the bundled installer script (`scripts/install-whisper-windows.ps1`)
+when you click *Install*; the script fetches the pinned official whisper.cpp release from
+GitHub, checks its SHA-256 and unpacks it under your user profile. You start it, you can read
+it, and you can close it.
 
 Releases are built by GitHub Actions from the committed lockfile and carry
 [artifact attestations](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations/using-artifact-attestations-to-establish-provenance-for-builds).

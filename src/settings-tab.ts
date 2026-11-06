@@ -4,7 +4,8 @@ import { installHint, locateWhisperServer } from "./core/whisper/locate";
 import type LectureCompanionPlugin from "./main";
 import { MicRecorder } from "./recorder";
 import { DEFAULT_SETTINGS } from "./settings";
-import { cpuCount, defaultThreads, nodeDownloadDeps, nodeLocateDeps } from "./node/deps";
+import { INSTALL_SCRIPT_WINDOWS, installerArgs, type WhisperBuild } from "./core/whisper/installer";
+import { cpuCount, defaultThreads, detectGpu, nodeDownloadDeps, nodeLocateDeps, runWindowsInstaller } from "./node/deps";
 
 export class LectureCompanionSettingTab extends PluginSettingTab {
 	private downloading?: AbortController;
@@ -28,7 +29,7 @@ export class LectureCompanionSettingTab extends PluginSettingTab {
 		const hint = installHint(process.platform);
 		const binarySetting = new Setting(containerEl)
 			.setName("whisper-server binary")
-			.setDesc("Leave empty to auto-detect (PATH, Scoop, Homebrew, ~/whisper.cpp). The plugin never downloads this binary itself.")
+			.setDesc("Leave empty to auto-detect (%LOCALAPPDATA%\\whisper.cpp, PATH, Scoop, Homebrew, ~/whisper.cpp). Use the installer below if it is not found.")
 			.addText((t) =>
 				t.setPlaceholder("auto-detect").setValue(s.whisperBinaryPath).onChange(async (v) => {
 					s.whisperBinaryPath = v.trim();
@@ -48,18 +49,38 @@ export class LectureCompanionSettingTab extends PluginSettingTab {
 			detectResult.toggleClass("lc-ok", !!found);
 		});
 
-		const install = new Setting(containerEl).setName("Install whisper.cpp").setDesc(hint.text);
-		install.addButton((b) => b.setButtonText("Install guide").setCta().onClick(() => window.open(hint.guideUrl)));
-		install.addButton((b) => b.setButtonText("Releases page").onClick(() => window.open(hint.url)));
-		if (hint.command) {
-			const command = hint.command;
-			install.addButton((b) =>
-				b.setButtonText(`Copy "${command}"`).setTooltip(hint.commandNote ?? "").onClick(async () => {
-					await navigator.clipboard.writeText(command);
-					new Notice(`Copied: ${command}${hint.commandNote ? ` (${hint.commandNote})` : ""}`);
-				}),
-			);
-		}
+		const install = new Setting(containerEl).setName("Install whisper.cpp").setDesc("");
+		install.descEl.createDiv({ text: hint.text });
+		const gpuLine = install.descEl.createDiv({ cls: "lc-setting-result", text: "Checking for a GPU…" });
+		void detectGpu().then((gpu) => {
+			if (gpu.vendor === "nvidia") {
+				gpuLine.setText(`NVIDIA GPU detected${gpu.name ? ` (${gpu.name})` : ""}. Use the GPU build: it transcribes 10× faster than the CPU build and keeps up with any model.`);
+				gpuLine.addClass("lc-ok");
+			} else if (gpu.vendor === "apple") {
+				gpuLine.setText("Apple silicon: the Homebrew build already uses the GPU (Metal).");
+			} else {
+				gpuLine.setText("No NVIDIA GPU detected: the CPU build is the right one.");
+			}
+			if (process.platform === "win32") {
+				const nvidia = gpu.vendor === "nvidia";
+				install.addButton((b) => {
+					b.setButtonText(nvidia ? "Install GPU build" : "Install CPU build").setCta().onClick(() => void this.runInstaller(nvidia ? "cuda" : "cpu", detectResult));
+				});
+				install.addButton((b) => {
+					b.setButtonText(nvidia ? "Install CPU build instead" : "Install GPU build (NVIDIA only)").onClick(() => void this.runInstaller(nvidia ? "cpu" : "cuda", detectResult));
+				});
+			}
+			install.addButton((b) => b.setButtonText("Install guide").onClick(() => window.open(hint.guideUrl)));
+			if (hint.command && process.platform !== "win32") {
+				const command = hint.command;
+				install.addButton((b) =>
+					b.setButtonText(`Copy "${command}"`).setTooltip(hint.commandNote ?? "").onClick(async () => {
+						await navigator.clipboard.writeText(command);
+						new Notice(`Copied: ${command}${hint.commandNote ? ` (${hint.commandNote})` : ""}`);
+					}),
+				);
+			}
+		});
 
 		const modelSetting = new Setting(containerEl)
 			.setName("Model")
@@ -453,6 +474,41 @@ export class LectureCompanionSettingTab extends PluginSettingTab {
 			);
 	}
 
+	/**
+	 * Runs the bundled installer script in a visible PowerShell window. The plugin itself never
+	 * downloads or writes an executable: the user starts the script, watches it, and can close
+	 * it; it fetches the official whisper.cpp release and verifies its checksum.
+	 */
+	private async runInstaller(build: WhisperBuild, detectResult: HTMLElement): Promise<void> {
+		const asset = build === "cuda" ? "whisper-bin-win-cuda-12.4.0-x64.zip (650 MB; needs an NVIDIA driver from 2024 or later)" : "whisper-bin-x64.zip (9 MB)";
+		const ok = await new ConfirmModal(
+			this.app,
+			build === "cuda" ? "Install whisper.cpp (GPU build)" : "Install whisper.cpp (CPU build)",
+			[
+				"A PowerShell window will open and run the installer script that ships with this plugin.",
+				`It downloads ${asset} from github.com/ggml-org/whisper.cpp (release b5454), verifies its SHA-256, and unpacks it to %LOCALAPPDATA%\\whisper.cpp.`,
+				"Nothing is installed system-wide and no administrator rights are needed. Close the window when it prints \"Installed\", then click Detect.",
+			].join("\n"),
+			"Open installer",
+		).ask();
+		if (!ok) return;
+		try {
+			const dir = this.plugin.vault.pluginDir(this.plugin.manifest.id, this.plugin.manifest.dir);
+			const scriptPath = await runWindowsInstaller(dir, INSTALL_SCRIPT_WINDOWS, (p) => installerArgs(p, build));
+			if (build === "cuda" && !this.plugin.settings.extraServerArgs.includes("-fa")) {
+				this.plugin.settings.extraServerArgs = `${this.plugin.settings.extraServerArgs} -fa`.trim();
+			}
+			this.plugin.settings.whisperBinaryPath = "";
+			await this.plugin.saveSettings();
+			this.plugin.server.stop();
+			detectResult.setText(`Installer started (${scriptPath}). When it finishes, click Detect.`);
+			detectResult.removeClass("lc-ok");
+			new Notice("The installer is running in a PowerShell window. Click Detect when it says Installed.", 10_000);
+		} catch (err) {
+			new Notice(`Could not start the installer: ${(err as Error).message}`, 10_000);
+		}
+	}
+
 	private async downloadCurrentModel(status: HTMLElement, progress: HTMLProgressElement, button: HTMLButtonElement, done: () => Promise<void>): Promise<void> {
 		const entry = findModel(this.plugin.settings.whisperModel);
 		if (!entry) return;
@@ -509,6 +565,7 @@ class ConfirmModal extends Modal {
 		app: App,
 		private heading: string,
 		private message: string,
+		private okLabel = "Download",
 	) {
 		super(app);
 	}
@@ -524,7 +581,7 @@ class ConfirmModal extends Modal {
 		this.titleEl.setText(this.heading);
 		for (const line of this.message.split("\n")) this.contentEl.createEl("p", { text: line });
 		const row = this.contentEl.createDiv({ cls: "modal-button-container" });
-		const yes = row.createEl("button", { text: "Download", cls: "mod-cta" });
+		const yes = row.createEl("button", { text: this.okLabel, cls: "mod-cta" });
 		yes.addEventListener("click", () => {
 			this.resolve?.(true);
 			this.resolve = undefined;

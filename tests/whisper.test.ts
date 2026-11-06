@@ -126,7 +126,9 @@ describe("locate", () => {
 	});
 
 	it("lists platform-appropriate candidates and hints", () => {
-		expect(candidatePaths({ ...base, platform: "win32", exists: async () => false, which: async () => null })[0]).toBe("D:\\scoop\\shims\\whisper-server.exe");
+		const win = candidatePaths({ ...base, platform: "win32", exists: async () => false, which: async () => null });
+		expect(win[0]).toBe("C:\\Users\\tony\\AppData\\Local\\whisper.cpp\\whisper-server.exe");
+		expect(win[1]).toBe("D:\\scoop\\shims\\whisper-server.exe");
 		expect(candidatePaths({ ...base, home: "/home/t", platform: "linux", exists: async () => false, which: async () => null })).toContain("/home/t/.local/bin/whisper-server");
 		expect(installHint("win32").command).toBe("scoop install whisper-cpp");
 		expect(installHint("darwin").command).toBe("brew install whisper-cpp");
