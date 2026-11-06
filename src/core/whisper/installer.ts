@@ -7,12 +7,14 @@ export const INSTALL_SCRIPT_WINDOWS = "# Installs the official whisper.cpp Windo
 export type WhisperBuild = "cpu" | "cuda";
 
 /**
- * PowerShell is started directly (not through `cmd /c start`): Node escapes embedded quotes
- * with backslashes, which cmd does not understand. A detached child gets its own console
- * window on Windows, so the user can watch the script run.
+ * The script must run in a console window the user can see. Node's `detached` flag uses
+ * DETACHED_PROCESS on Windows, which gives a console program *no* console, and `cmd /c start`
+ * breaks on Node's quote escaping, so a short-lived hidden PowerShell runs `Start-Process`,
+ * which opens a fresh visible window for the installer.
  */
 export function installerArgs(scriptPath: string, build: WhisperBuild): { command: string; args: string[] } {
-	const args = ["-NoExit", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath];
-	if (build === "cuda") args.push("-Cuda");
-	return { command: "powershell.exe", args };
+	const q = (s: string): string => `'${s.replace(/'/g, "''")}'`;
+	const list = ["-NoExit", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath, ...(build === "cuda" ? ["-Cuda"] : [])];
+	const command = `Start-Process -FilePath powershell.exe -ArgumentList @(${list.map(q).join(",")})`;
+	return { command: "powershell.exe", args: ["-NoProfile", "-NonInteractive", "-Command", command] };
 }

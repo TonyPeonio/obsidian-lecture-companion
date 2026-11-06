@@ -66,8 +66,14 @@ export async function runWindowsInstaller(scriptDir: string, scriptText: string,
 	const scriptPath = `${scriptDir.replace(/[\\/]+$/, "")}\\install-whisper-windows.ps1`;
 	await fs.writeFile(scriptPath, scriptText, "utf8");
 	const { command, args: argv } = args(scriptPath);
-	const child = spawn(command, argv, { windowsHide: false, detached: true, stdio: "ignore" });
-	child.unref();
+	// The launcher itself stays hidden and exits at once; Start-Process inside it opens the visible window.
+	await new Promise<void>((resolve, reject) => {
+		let err = "";
+		const child = spawn(command, argv, { windowsHide: true, stdio: ["ignore", "ignore", "pipe"] });
+		child.stderr?.on("data", (d: Buffer) => (err += d.toString()));
+		child.on("error", reject);
+		child.on("close", (code) => (code === 0 ? resolve() : reject(new Error(err.trim() || `launcher exited with code ${String(code)}`))));
+	});
 	return scriptPath;
 }
 
