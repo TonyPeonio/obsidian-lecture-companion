@@ -63,11 +63,16 @@ describe("rankSlides", () => {
 		expect(ranked.find((r) => r.id === 2)?.reasons).toContain("next in series (#12)");
 	});
 
-	it("falls back to sequence and recency without a transcript", () => {
+	it("falls back to sequence and recency without a transcript, still pre-selecting one deck", () => {
 		const ranked = rankSlides("", decks, { previousNames: ["Lecture 11 - Sorting I.pdf"], lectureDate: "2026-11-05" });
 		expect(ranked[0]?.id).toBe(2); // next in series beats recency alone
-		expect(ranked.filter((r) => r.selected).map((r) => r.id).sort()).toEqual([2, 4, 5]);
+		expect(ranked.filter((r) => r.selected).map((r) => r.id)).toEqual([2]);
 		expect(isConfident(ranked)).toBe(false);
+	});
+
+	it("pre-selects nothing when no signal recommends any deck", () => {
+		const ranked = rankSlides("", decks.map((d) => ({ ...d, updatedAt: "2026-01-01T00:00:00Z" })), { previousNames: [], lectureDate: "2026-11-05" });
+		expect(ranked.some((r) => r.selected)).toBe(false);
 	});
 
 	it("handles an empty pool", () => {

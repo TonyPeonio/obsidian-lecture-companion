@@ -139,8 +139,8 @@ Click the microphone in the ribbon or run **Lecture Companion: Open panel**.
    Summary section.
 4. Before the summary, the plugin **matches slides to the lecture**: it ranks every deck in the
    Canvas course by how much its text overlaps the transcript (with a nudge for the next deck
-   in the series and for recently changed files) and shows a picker with the likely ones
-   checked. Confirm, and the decks are embedded under *Slides* with their text in a folded
+   in the series and for recently changed files) and shows a picker with the best match
+   checked. Confirm, and the deck is embedded under *Slides* with its text in a folded
    callout, so the summary can use them. Set *Match slides to the lecture* to *Automatic* to
    skip the picker when one deck clearly wins, or *Off*.
    - **Choose slides for this lecture note** re-runs the picker on any lecture note and

@@ -134,28 +134,14 @@ export function rankSlides(transcript: string, candidates: SlideCandidate[], opt
 	});
 
 	ranked.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
+	// A lecture almost always has exactly one deck: pre-select only the top candidate, and only
+	// when something actually recommends it (a text match, the series order or recency).
 	const best = ranked[0];
-	if (best) {
-		if (hasTranscript) {
-			// Pre-select decks that are clearly in play; never more than three.
-			const floor = Math.max(0.12, best.similarity * 0.6);
-			let count = 0;
-			for (const r of ranked) {
-				if (r.similarity >= floor && count < 3 && (r.similarity > 0 || r === best)) {
-					r.selected = true;
-					count++;
-				}
-			}
-			if (count === 0) best.selected = best.score > 0;
-		} else {
-			for (const r of ranked) r.selected = r.sequenceBonus >= 0.15 || r.recencyBonus > 0;
-			if (!ranked.some((r) => r.selected)) best.selected = true;
-		}
-	}
+	if (best && best.score > 0) best.selected = true;
 	return ranked;
 }
 
-/** True when the top candidate stands out enough to attach without asking. */
+/** True when the top candidate stands out enough to attach without asking (automatic mode). */
 export function isConfident(ranked: RankedSlide[]): boolean {
 	const [a, b] = ranked;
 	if (!a || a.similarity < 0.25) return false;
