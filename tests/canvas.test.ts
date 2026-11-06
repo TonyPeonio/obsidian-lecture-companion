@@ -117,6 +117,10 @@ describe("helpers", () => {
 		expect(resolveCourse(courses, "algebra")?.id).toBe(2);
 		expect(resolveCourse(courses, "computer science intro")?.id).toBe(1);
 		expect(resolveCourse(courses, "chemistry")).toBeNull();
+		const bio = [{ id: 777, name: "Fall 2026 BIOINFORMATICS (CSCI-578-A, CSCI-478-A, BIOL-510-A)", courseCode: "CSCI-578-A" }];
+		expect(resolveCourse(bio, "CSCI578")?.id).toBe(777);
+		expect(resolveCourse(bio, "biol510")?.id).toBe(777);
+		expect(resolveCourse(bio, "CSCI579")).toBeNull();
 	});
 
 	it("nextLink", () => {

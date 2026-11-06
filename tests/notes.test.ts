@@ -17,7 +17,7 @@ import {
 	upsertSection,
 } from "../src/core/notes";
 import { buildSummaryMessages, fitToContext, stripThinkTags } from "../src/core/summarize";
-import { courseNoteOverride, DEFAULT_SETTINGS, parseCourseNotes } from "../src/settings";
+import { addCourseAlias, courseNoteOverride, DEFAULT_SETTINGS, parseCourseNotes, parseKeyValueLines, vaultCourseName } from "../src/settings";
 
 describe("paths and formatting", () => {
 	it("sanitizes names and builds paths", () => {
@@ -130,5 +130,17 @@ describe("settings helpers", () => {
 		expect(courseNoteOverride(s, { id: 12345, name: "X" })).toBe("A.md");
 		expect(courseNoteOverride(s, { name: "Intro", courseCode: "CS101" })).toBe("B.md");
 		expect(courseNoteOverride(s, { name: "Other" })).toBeUndefined();
+	});
+
+	it("maps Canvas courses to the names used in the vault", () => {
+		const canvas = { id: 777, name: "Fall 2026 BIOINFORMATICS (CSCI-578-A, CSCI-478-A, BIOL-510-A)", courseCode: "CSCI-578-A" };
+		const s = { ...DEFAULT_SETTINGS };
+		expect(vaultCourseName(s, canvas)).toBe("CSCI-578-A");
+		expect(vaultCourseName(s, { id: 1, name: "No Code" })).toBe("No Code");
+		expect(addCourseAlias(s, canvas, "CSCI578")).toBe(true);
+		expect(s.courseAliases).toBe("777 = CSCI578");
+		expect(addCourseAlias(s, canvas, "Other")).toBe(false);
+		expect(vaultCourseName(s, canvas)).toBe("CSCI578");
+		expect(parseKeyValueLines("# c\nA = b\nbad\n = x\n")).toEqual([{ key: "a", value: "b" }]);
 	});
 });

@@ -1,5 +1,7 @@
 export type NoteMode = "per-lecture" | "per-course-section";
 export type ThinkingMode = "auto" | "on" | "off";
+/** ask = show the picker; auto = attach without asking when the match is clear; off = never match. */
+export type SlideMatching = "ask" | "auto" | "off";
 
 export interface LectureCompanionSettings {
 	// Whisper
@@ -28,6 +30,9 @@ export interface LectureCompanionSettings {
 	canvasToken: string;
 	/** "Today's" slides include files changed in the last N days (1 = today only). */
 	lookbackDays: number;
+	slideMatching: SlideMatching;
+	/** One per line: `canvas course id, name or code = name used in the vault`. Learned automatically from the course picker. */
+	courseAliases: string;
 	courseFolder: string;
 	/** One per line: `course id or name = path/to/note.md` */
 	courseNotes: string;
@@ -65,6 +70,8 @@ export const DEFAULT_SETTINGS: LectureCompanionSettings = {
 	canvasUrl: "",
 	canvasToken: "",
 	lookbackDays: 1,
+	slideMatching: "ask",
+	courseAliases: "",
 	courseFolder: "Courses",
 	courseNotes: "",
 	dateHeading: "## {{date}}",
@@ -108,6 +115,39 @@ export function courseNoteOverride(
 		if (keys.includes(entry.key)) return entry.path;
 	}
 	return undefined;
+}
+
+/** `key = value` lines; keys lower-cased. Shared by the alias and note-override settings. */
+export function parseKeyValueLines(text: string): { key: string; value: string }[] {
+	const out: { key: string; value: string }[] = [];
+	for (const raw of text.split("\n")) {
+		const line = raw.trim();
+		if (!line || line.startsWith("#")) continue;
+		const idx = line.indexOf("=");
+		if (idx <= 0) continue;
+		const key = line.slice(0, idx).trim().toLowerCase();
+		const value = line.slice(idx + 1).trim();
+		if (key && value) out.push({ key, value });
+	}
+	return out;
+}
+
+/** The name notes use for a Canvas course: an alias if one is set, else the course code, else the full name. */
+export function vaultCourseName(settings: LectureCompanionSettings, course: { id: number; name: string; courseCode?: string }): string {
+	const keys = [String(course.id), course.name, course.courseCode ?? ""].filter(Boolean).map((k) => k.toLowerCase());
+	for (const entry of parseKeyValueLines(settings.courseAliases)) {
+		if (keys.includes(entry.key)) return entry.value;
+	}
+	return course.courseCode?.trim() || course.name;
+}
+
+/** Adds `id = alias` unless the course already has an alias. Returns true when settings changed. */
+export function addCourseAlias(settings: LectureCompanionSettings, course: { id: number; name: string; courseCode?: string }, alias: string): boolean {
+	const keys = [String(course.id), course.name, course.courseCode ?? ""].filter(Boolean).map((k) => k.toLowerCase());
+	if (parseKeyValueLines(settings.courseAliases).some((e) => keys.includes(e.key))) return false;
+	const line = `${course.id} = ${alias.trim()}`;
+	settings.courseAliases = settings.courseAliases.trim() ? `${settings.courseAliases.trim()}\n${line}` : line;
+	return true;
 }
 
 export function manualCourseList(settings: LectureCompanionSettings): string[] {

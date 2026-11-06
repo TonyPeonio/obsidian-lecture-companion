@@ -230,14 +230,22 @@ export class CanvasClient {
 	}
 }
 
-/** Fuzzy course lookup: numeric id, exact name/code, then substring or token overlap. */
+/** Letters and digits only, so "CSCI578" matches "CSCI-578-A". */
+function squash(s: string): string {
+	return s.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+/** Fuzzy course lookup: numeric id, exact name/code, then substring (ignoring punctuation) or token overlap. */
 export function resolveCourse(courses: CanvasCourse[], query: string): CanvasCourse | null {
 	const q = query.trim().toLowerCase();
 	if (!q) return null;
 	if (/^\d+$/.test(q)) return courses.find((c) => String(c.id) === q) ?? null;
 	const exact = courses.find((c) => c.name.toLowerCase() === q || c.courseCode.toLowerCase() === q);
 	if (exact) return exact;
-	const sub = courses.filter((c) => c.name.toLowerCase().includes(q) || c.courseCode.toLowerCase().includes(q));
+	const sq = squash(q);
+	const sub = courses.filter(
+		(c) => c.name.toLowerCase().includes(q) || c.courseCode.toLowerCase().includes(q) || (sq.length >= 4 && (squash(c.name).includes(sq) || squash(c.courseCode).includes(sq))),
+	);
 	if (sub.length === 1) return sub[0] ?? null;
 	const tokens = q.split(/[^a-z0-9]+/).filter(Boolean);
 	let best: { course: CanvasCourse; score: number } | null = null;

@@ -2,14 +2,15 @@ import { Modal, Notice, Platform, Plugin, requestUrl, TFile, type App, type Work
 import { describePull, pullSlides } from "./canvas-pull";
 import { CanvasClient, resolveCourse, type CanvasCourse } from "./core/canvas";
 import type { HttpRequest } from "./core/http";
-import { courseNotePath, dateHeading, lectureNotePath, renderLectureNote, toISODate } from "./core/notes";
+import { courseNotePath, dateHeading, lectureNotePath, renderLectureNote, SECTION_SLIDES, SECTION_TRANSCRIPT, toISODate } from "./core/notes";
+import { SlideMatcher } from "./slide-matcher";
 import { OllamaClient } from "./core/ollama";
 import { locateWhisperServer } from "./core/whisper/locate";
 import { findModel, modelPath, VAD_MODEL } from "./core/whisper/models";
 import { parseExtraArgs, WhisperServerManager, type ServerConfig, type ServerState } from "./core/whisper/server";
 import { defaultThreads, nodeLocateDeps, nodeServerDeps } from "./node/deps";
-import { LectureSession } from "./session";
-import { courseNoteOverride, DEFAULT_SETTINGS, manualCourseList, type LectureCompanionSettings } from "./settings";
+import { cleanTranscript, LectureSession } from "./session";
+import { addCourseAlias, courseNoteOverride, DEFAULT_SETTINGS, manualCourseList, vaultCourseName, type LectureCompanionSettings } from "./settings";
 import { LectureCompanionSettingTab } from "./settings-tab";
 import { VaultIO, type NoteTarget } from "./vault";
 import { LectureView, VIEW_TYPE } from "./view";
@@ -22,6 +23,7 @@ export default class LectureCompanionPlugin extends Plugin {
 	canvas!: CanvasClient;
 	ollama!: OllamaClient;
 	session!: LectureSession;
+	matcher!: SlideMatcher;
 	modelsDir = "";
 	private courses: CanvasCourse[] = [];
 	private serverListeners = new Set<(state: ServerState) => void>();
@@ -62,6 +64,7 @@ export default class LectureCompanionPlugin extends Plugin {
 			},
 		);
 		this.session = new LectureSession(this);
+		this.matcher = new SlideMatcher(this);
 
 		this.registerView(VIEW_TYPE, (leaf) => new LectureView(leaf, this));
 		this.addRibbonIcon("mic", "Lecture Companion", () => void this.activateView());
@@ -115,6 +118,16 @@ export default class LectureCompanionPlugin extends Plugin {
 			name: "Pull Canvas slides for a date…",
 			callback: () => {
 				new DateModal(this.app, (date) => void this.pullSlidesCommand(date)).open();
+			},
+		});
+		this.addCommand({
+			id: "choose-slides",
+			name: "Choose slides for this lecture note",
+			checkCallback: (checking) => {
+				const file = this.app.workspace.getActiveFile();
+				if (!(file instanceof TFile) || file.extension !== "md" || this.session.isBusy) return false;
+				if (!checking) void this.chooseSlidesForNote(file.path);
+				return true;
 			},
 		});
 		this.addCommand({
@@ -223,7 +236,7 @@ export default class LectureCompanionPlugin extends Plugin {
 		return { path: lectureNotePath(s.courseFolder, course, date) };
 	}
 
-	/** Creates the lecture note skeleton (and the course note link) when missing. */
+	/** Creates the lecture note skeleton (and the course note link) when missing. `course` is the vault name (alias). */
 	async ensureLectureNote(course: string, date: string): Promise<NoteTarget> {
 		const target = this.noteTargetFor(course, date);
 		if (target.parentHeading) {
@@ -249,6 +262,78 @@ export default class LectureCompanionPlugin extends Plugin {
 
 	// ------------------------------------------------------------------- canvas
 
+	/** The Canvas course behind a name typed in the picker or stored in a note (alias first, then fuzzy). */
+	canvasCourseFor(name: string): CanvasCourse | undefined {
+		const wanted = name.trim().toLowerCase();
+		if (!wanted) return undefined;
+		return this.courses.find((c) => vaultCourseName(this.settings, c).toLowerCase() === wanted) ?? resolveCourse(this.courses, name) ?? undefined;
+	}
+
+	/** Remembers "typed name → Canvas course" so pulls use the same note name the user chose. */
+	async learnCourseAlias(typed: string): Promise<void> {
+		if (!this.canvas.configured) return;
+		if (this.courses.length === 0) await this.refreshCourses().catch(() => undefined);
+		const course = this.canvasCourseFor(typed);
+		if (course && addCourseAlias(this.settings, course, typed)) await this.saveSettings();
+	}
+
+	/** Called by the session after the transcript is written and before the summary. */
+	async matchSlidesForSession(course: string, date: string, target: NoteTarget, transcript: string): Promise<void> {
+		if (!this.canvas.configured || this.settings.slideMatching === "off") return;
+		const existing = cleanTranscript((await this.vault.readSection(target, SECTION_SLIDES)) ?? "", false);
+		if (existing) return; // slides already chosen for this lecture
+		if (this.courses.length === 0) await this.refreshCourses();
+		const canvasCourse = this.canvasCourseFor(course);
+		if (!canvasCourse) {
+			new Notice(`No Canvas course matches "${course}"; slides not matched. Add an alias in settings if the names differ.`, 8000);
+			return;
+		}
+		const notice = new Notice("Matching slides to the lecture…", 0);
+		try {
+			const result = await this.matcher.run({ canvasCourse, course, date, target, transcript, windowOnly: false, mode: this.settings.slideMatching, replace: false, onStatus: (m) => notice.setMessage(m) });
+			notice.hide();
+			if (result.attached.length) new Notice(`Attached: ${result.attached.join(", ")}`, 6000);
+			else if (!result.skipped && result.candidates === 0) new Notice("No slide files found in that Canvas course.", 6000);
+			for (const e of result.errors) new Notice(e, 8000);
+		} catch (err) {
+			notice.hide();
+			throw err;
+		}
+	}
+
+	/** "Choose slides for this lecture note": re-pick from the whole course and replace the Slides section. */
+	async chooseSlidesForNote(path: string): Promise<void> {
+		if (!this.canvas.configured) {
+			new Notice("Set the Canvas URL and access token in settings first.");
+			return;
+		}
+		const md = await this.vault.read(path);
+		const fm = /^---\n([\s\S]*?)\n---/.exec(md)?.[1] ?? "";
+		const courseFromFm = /^course:\s*"?(.*?)"?\s*$/m.exec(fm)?.[1]?.trim();
+		const parts = path.split("/");
+		const course = courseFromFm || (parts.length >= 2 ? (parts[parts.length - 2] ?? "") : "");
+		const date = /^date:\s*(\d{4}-\d{2}-\d{2})/m.exec(fm)?.[1] ?? /(\d{4}-\d{2}-\d{2})\.md$/.exec(path)?.[1] ?? toISODate();
+		const target = this.targetForExistingNote(path);
+		await this.learnCourseAlias(course);
+		const canvasCourse = this.canvasCourseFor(course);
+		if (!canvasCourse) {
+			new Notice(`No Canvas course matches "${course}". Add an alias in settings (Canvas id = ${course}).`, 8000);
+			return;
+		}
+		const transcript = (await this.vault.readSection(target, SECTION_TRANSCRIPT)) ?? "";
+		const notice = new Notice("Reading the course's slide decks…", 0);
+		try {
+			const result = await this.matcher.run({ canvasCourse, course, date, target, transcript, windowOnly: false, mode: "ask", replace: true, onStatus: (m) => notice.setMessage(m) });
+			notice.hide();
+			if (result.skipped) return;
+			new Notice(result.attached.length ? `Slides replaced: ${result.attached.join(", ")}. Run "Summarize this lecture note" to refresh the summary.` : "Slides section cleared.", 8000);
+			for (const e of result.errors) new Notice(e, 8000);
+		} catch (err) {
+			notice.hide();
+			new Notice(`Choosing slides failed: ${(err as Error).message}`, 8000);
+		}
+	}
+
 	async pullSlidesCommand(date: string, courseQuery?: string): Promise<void> {
 		if (!this.canvas.configured) {
 			new Notice("Set the Canvas URL and access token in settings first.");
@@ -256,21 +341,42 @@ export default class LectureCompanionPlugin extends Plugin {
 		}
 		const notice = new Notice("Pulling slides from Canvas…", 0);
 		try {
-			let course: CanvasCourse | undefined;
+			if (this.courses.length === 0) await this.refreshCourses();
+			let courses = this.courses;
 			if (courseQuery) {
-				if (this.courses.length === 0) await this.refreshCourses();
-				course = resolveCourse(this.courses, courseQuery) ?? undefined;
+				const course = this.canvasCourseFor(courseQuery);
 				if (!course) {
 					notice.hide();
 					new Notice(`No active Canvas course matches "${courseQuery}".`);
 					return;
 				}
+				courses = [course];
 			}
-			const results = await pullSlides(this, { date, course, onStatus: (m) => notice.setMessage(m) });
+			if (this.settings.slideMatching === "off") {
+				const results = await pullSlides(this, { date, course: courseQuery ? courses[0] : undefined, onStatus: (m) => notice.setMessage(m) });
+				notice.hide();
+				new Notice(describePull(results), 8000);
+			} else {
+				const attached: string[] = [];
+				const errors: string[] = [];
+				for (const canvasCourse of courses) {
+					const course = vaultCourseName(this.settings, canvasCourse);
+					notice.setMessage(`Checking ${course}…`);
+					// Only create a lecture note when the window actually holds files.
+					const probe = await this.matcher.candidateCount(canvasCourse, date, true);
+					if (probe === 0) continue;
+					const target = await this.ensureLectureNote(course, date);
+					const transcript = (await this.vault.readSection(target, SECTION_TRANSCRIPT)) ?? "";
+					const result = await this.matcher.run({ canvasCourse, course, date, target, transcript, windowOnly: true, mode: this.settings.slideMatching, replace: false, onStatus: (m) => notice.setMessage(m) });
+					attached.push(...result.attached.map((n) => `${n} (${course})`));
+					errors.push(...result.errors);
+				}
+				notice.hide();
+				new Notice(attached.length ? `Attached ${attached.length}: ${attached.join(", ")}` : "No new slide files in that window.", 8000);
+				for (const e of errors) new Notice(e, 8000);
+			}
 			this.settings.lastCanvasPull = toISODate();
 			await this.saveSettings();
-			notice.hide();
-			new Notice(describePull(results), 8000);
 		} catch (err) {
 			notice.hide();
 			new Notice(`Canvas pull failed: ${(err as Error).message}`, 8000);

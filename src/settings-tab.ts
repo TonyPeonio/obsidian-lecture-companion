@@ -372,6 +372,31 @@ export class LectureCompanionSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
+			.setName("Match slides to the lecture")
+			.setDesc("When a recording stops, rank the course's decks by overlap with the transcript (plus series order and recency). Ask: show the picker. Auto: attach without asking when one deck clearly wins. Off: never.")
+			.addDropdown((d) =>
+				d
+					.addOption("ask", "Ask (show the picker)")
+					.addOption("auto", "Automatic when the match is clear")
+					.addOption("off", "Off")
+					.setValue(s.slideMatching)
+					.onChange(async (v) => {
+						s.slideMatching = v === "auto" ? "auto" : v === "off" ? "off" : "ask";
+						await save();
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName("Course names")
+			.setDesc("Canvas course → name used for notes, one per line: `canvas id, code or name = My name`. Filled in automatically from the course you type in the panel; without an entry the Canvas course code is used.")
+			.addTextArea((t) =>
+				t.setPlaceholder("12345 = CSCI578").setValue(s.courseAliases).onChange(async (v) => {
+					s.courseAliases = v;
+					await save();
+				}),
+			);
+
+		new Setting(containerEl)
 			.setName("Look back (days)")
 			.setDesc("\"Today's\" slides include files changed in the last N days, so decks posted the evening before are picked up. 1 = the chosen day only.")
 			.addText((t) =>

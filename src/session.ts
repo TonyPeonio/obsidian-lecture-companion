@@ -11,7 +11,7 @@ import type LectureCompanionPlugin from "./main";
 import { MicRecorder, TARGET_RATE } from "./recorder";
 import type { NoteTarget } from "./vault";
 
-export type SessionStatus = "idle" | "starting" | "recording" | "paused" | "finishing" | "summarizing" | "done" | "error";
+export type SessionStatus = "idle" | "starting" | "recording" | "paused" | "finishing" | "matching" | "summarizing" | "done" | "error";
 
 const EMPTY_PROGRESS: PipelineProgress = { recordedSec: 0, transcribedSec: 0, queued: 0, busy: false };
 
@@ -76,7 +76,7 @@ export class LectureSession {
 	}
 
 	get isLive(): boolean {
-		return this.status === "recording" || this.status === "paused" || this.status === "starting" || this.status === "finishing";
+		return this.status === "recording" || this.status === "paused" || this.status === "starting" || this.status === "finishing" || this.status === "matching";
 	}
 
 	get isBusy(): boolean {
@@ -113,6 +113,7 @@ export class LectureSession {
 		this.emit();
 		try {
 			await this.plugin.startServer();
+			await this.plugin.learnCourseAlias(name);
 			this.target = await this.plugin.ensureLectureNote(name, date);
 			// A second recording of the same lecture appends instead of wiping the first.
 			this.priorTranscript = cleanTranscript((await this.plugin.vault.readSection(this.target, SECTION_TRANSCRIPT)) ?? "", true);
@@ -252,6 +253,15 @@ export class LectureSession {
 			}
 			await this.writeTranscript();
 			this.level = 0;
+			if (this.segments.length > 0 && this.target) {
+				this.status = "matching";
+				this.emit();
+				try {
+					await this.plugin.matchSlidesForSession(this.course, this.date, this.target, transcriptToMarkdown(this.segments));
+				} catch (err) {
+					new Notice(`Slide matching failed: ${(err as Error).message}`, 8000);
+				}
+			}
 			if (this.plugin.settings.summarizeOnStop && this.segments.length > 0) {
 				await this.summarize();
 			}

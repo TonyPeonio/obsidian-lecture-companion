@@ -137,9 +137,19 @@ Click the microphone in the ribbon or run **Lecture Companion: Open panel**.
 3. Press **stop**. The plugin finishes the last chunk, saves the audio (Opus, about 20 MB per
    hour) and the transcript into the lecture note, then streams a summary from Ollama into the
    Summary section.
-4. Press **download** to pull the day's slides from Canvas for that course, or run **Pull
-   today's Canvas slides** for all courses. Each file is embedded under *Slides* with its text in
-   a folded callout. Turn on *Pull slides automatically once a day* to do this at startup.
+4. Before the summary, the plugin **matches slides to the lecture**: it ranks every deck in the
+   Canvas course by how much its text overlaps the transcript (with a nudge for the next deck
+   in the series and for recently changed files) and shows a picker with the likely ones
+   checked. Confirm, and the decks are embedded under *Slides* with their text in a folded
+   callout, so the summary can use them. Set *Match slides to the lecture* to *Automatic* to
+   skip the picker when one deck clearly wins, or *Off*.
+   - **Choose slides for this lecture note** re-runs the picker on any lecture note and
+     replaces its Slides section (then run *Summarize this lecture note*).
+   - **Pull today's Canvas slides** / the **download** button fetch files changed in the
+     look-back window without a transcript; the picker then ranks by series order and recency.
+     *Pull slides automatically once a day* does this at startup.
+   - Decks are downloaded once for matching and their text is cached in the plugin folder
+     (`slide-cache.json`), so later matches are instant.
 
 ### Commands
 
@@ -182,6 +192,10 @@ a **remote whisper-server URL**, no process is started and that server is used i
   the same.
 - **Recording the same lecture twice** appends to the Transcript section rather than
   replacing it, so a quick test recording before class does not wipe the real one.
+- **Course names** — notes are named after what you type in the panel ("CSCI578"), not
+  Canvas's long title ("Fall 2026 BIOINFORMATICS (CSCI-578-A, …)"). The first time a typed
+  name matches a Canvas course, the pairing is saved under *Course names* in the Canvas
+  settings; edit it there if a course should use a different folder.
 - **Maximum chunk length** — shorter chunks show text sooner but give Whisper less context.
   20 s is a good default; 10–12 s if you want it snappier.
 - **Layout** — *One note per lecture* (recommended; transcripts are long) or *Sections in the

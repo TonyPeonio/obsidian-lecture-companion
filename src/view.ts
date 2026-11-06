@@ -292,6 +292,8 @@ function statusLabel(status: string, course: string, date: string): string {
 			return `Paused${where}`;
 		case "finishing":
 			return `Finishing transcript${where}`;
+		case "matching":
+			return `Matching slides${where}`;
 		case "summarizing":
 			return `Summarizing${where}`;
 		case "done":

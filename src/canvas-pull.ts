@@ -6,6 +6,7 @@ import { extractSlideText, slideKind } from "./core/extract";
 import type { PdfJsLike } from "./core/extract/pdf";
 import { addDays, safeFileName, SECTION_SLIDES, slidesToMarkdown, startOfDay, type SlideAttachment } from "./core/notes";
 import type LectureCompanionPlugin from "./main";
+import { vaultCourseName } from "./settings";
 
 export interface PullResult {
 	course: string;
@@ -41,7 +42,7 @@ export async function pullSlides(plugin: LectureCompanionPlugin, opts: PullOptio
 			continue;
 		}
 		if (files.length === 0) continue;
-		const target = await plugin.ensureLectureNote(course.name, opts.date);
+		const target = await plugin.ensureLectureNote(vaultCourseName(plugin.settings, course), opts.date);
 		const existing = (await plugin.vault.readSection(target, SECTION_SLIDES)) ?? "";
 		const attachments: SlideAttachment[] = [];
 		for (const file of files) {

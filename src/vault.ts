@@ -1,5 +1,5 @@
 import { type App, normalizePath, TFile, TFolder } from "obsidian";
-import { nestedSectionBody, sectionBody, upsertNestedSection, upsertSection } from "./core/notes";
+import { courseNotePath, nestedSectionBody, safeFileName, sectionBody, upsertNestedSection, upsertSection } from "./core/notes";
 
 /** Where a lecture's sections live: a note, optionally nested under a date heading. */
 export interface NoteTarget {
@@ -113,6 +113,18 @@ export class VaultIO {
 			else if (child instanceof TFile && child.extension === "md") names.add(child.basename);
 		}
 		return [...names].sort((a, b) => a.localeCompare(b));
+	}
+
+	/** Paths of the per-lecture notes (`<folder>/<course>/YYYY-MM-DD.md`) plus the course note itself. */
+	lectureNotePaths(folder: string, course: string): string[] {
+		const out: string[] = [];
+		const dir = this.app.vault.getAbstractFileByPath(normalizePath(`${folder}/${safeFileName(course)}`));
+		if (dir instanceof TFolder) {
+			for (const child of dir.children) if (child instanceof TFile && child.extension === "md") out.push(child.path);
+		}
+		const courseNote = normalizePath(courseNotePath(folder, course));
+		if (this.file(courseNote)) out.push(courseNote);
+		return out;
 	}
 
 	/** Absolute filesystem path of the plugin's folder (desktop only). */
