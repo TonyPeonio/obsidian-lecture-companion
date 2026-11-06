@@ -167,6 +167,16 @@ export default class LectureCompanionPlugin extends Plugin {
 			},
 		});
 		this.addCommand({
+			id: "rebuild-course-index",
+			name: "Rebuild course note links (list every lecture note under its date)",
+			callback: async () => {
+				const courses = this.vault.coursesInFolder(this.settings.courseFolder);
+				let total = 0;
+				for (const c of courses) total += await this.rebuildCourseIndex(c);
+				new Notice(`Course notes updated for ${courses.length} course${courses.length === 1 ? "" : "s"} (${total} lecture notes linked).`);
+			},
+		});
+		this.addCommand({
 			id: "choose-slides",
 			name: "Choose slides for this lecture note",
 			checkCallback: (checking) => {
@@ -290,13 +300,28 @@ export default class LectureCompanionPlugin extends Plugin {
 			await this.vault.createIfMissing(target.path, "");
 			return target;
 		}
-		const created = await this.vault.createIfMissing(target.path, renderLectureNote({ course, date }));
-		if (created) {
-			const coursePath = courseNotePath(this.settings.courseFolder, course);
-			const link = `[[${target.path.replace(/\.md$/, "")}|${date} lecture]]`;
-			await this.vault.writeSection({ path: coursePath, parentHeading: dateHeading(this.settings.dateHeading, date) }, "Lectures", `- ${link}`, "append", "");
-		}
+		await this.vault.createIfMissing(target.path, renderLectureNote({ course, date }));
+		await this.ensureCourseLink(course, date, target.path);
 		return target;
+	}
+
+	/** Makes sure the course note (`Courses/<course>.md`) lists this lecture under its date heading. Idempotent. */
+	async ensureCourseLink(course: string, date: string, lecturePath: string): Promise<void> {
+		const coursePath = courseNotePath(this.settings.courseFolder, course);
+		const linkTarget = lecturePath.replace(/\.md$/, "");
+		const existing = this.vault.exists(coursePath) ? await this.vault.read(coursePath) : "";
+		if (existing.includes(`[[${linkTarget}|`) || existing.includes(`[[${linkTarget}]]`)) return;
+		await this.vault.writeSection({ path: coursePath, parentHeading: dateHeading(this.settings.dateHeading, date) }, "Lectures", `- [[${linkTarget}|${date} lecture]]`, "append", "");
+	}
+
+	/** Rebuilds the course note's lecture list for one course from the notes on disk, in date order. */
+	async rebuildCourseIndex(course: string): Promise<number> {
+		const paths = this.vault.lectureNotePaths(this.settings.courseFolder, course).filter((p) => /\/\d{4}-\d{2}-\d{2}\.md$/.test(p)).sort();
+		for (const p of paths) {
+			const date = /(\d{4}-\d{2}-\d{2})\.md$/.exec(p)?.[1];
+			if (date) await this.ensureCourseLink(course, date, p);
+		}
+		return paths.length;
 	}
 
 	private targetForExistingNote(path: string): NoteTarget {

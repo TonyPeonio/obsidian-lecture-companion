@@ -48,7 +48,7 @@ export async function importNotesAsLecture(plugin: LectureCompanionPlugin, opts:
 			created = await plugin.vault.createIfMissing(target.path, renderLectureNote({ course, date: opts.date, myNotes: notes }));
 			if (!created) await plugin.vault.writeSection(target, SECTION_MY_NOTES, notes, "append");
 		}
-		if (created) await plugin.ensureLectureNote(course, opts.date); // links it from the course note
+		await plugin.ensureCourseLink(course, opts.date, target.path);
 	} else {
 		await plugin.ensureLectureNote(course, opts.date);
 		await plugin.vault.writeSection(target, SECTION_MY_NOTES, notes, "append");
