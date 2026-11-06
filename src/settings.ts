@@ -18,6 +18,11 @@ export interface LectureCompanionSettings {
 	extraServerArgs: string;
 	// Recording
 	keepAudio: boolean;
+	/**
+	 * Where recordings and downloaded slides go. `{{notefolder}}` = the lecture note's folder.
+	 * Empty = Obsidian's own "Default location for new attachments".
+	 */
+	attachmentFolder: string;
 	chunkSeconds: number;
 	silenceCutMs: number;
 	inputDeviceId: string;
@@ -62,6 +67,7 @@ export const DEFAULT_SETTINGS: LectureCompanionSettings = {
 	useVad: false,
 	extraServerArgs: "",
 	keepAudio: true,
+	attachmentFolder: "{{notefolder}}/attachments",
 	chunkSeconds: 20,
 	silenceCutMs: 700,
 	inputDeviceId: "",

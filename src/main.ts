@@ -30,7 +30,7 @@ export default class LectureCompanionPlugin extends Plugin {
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
-		this.vault = new VaultIO(this.app);
+		this.vault = new VaultIO(this.app, () => this.settings.attachmentFolder);
 		this.modelsDir = `${this.vault.pluginDir(this.manifest.id, this.manifest.dir)}/models`;
 
 		this.http = async (opts) => {

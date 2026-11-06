@@ -9,7 +9,11 @@ export interface NoteTarget {
 
 /** Thin, awaitable wrapper around the parts of the Vault API the plugin needs. */
 export class VaultIO {
-	constructor(private app: App) {}
+	constructor(
+		private app: App,
+		/** Attachment folder template; empty = Obsidian's default location. */
+		private getAttachmentFolder: () => string = () => "",
+	) {}
 
 	exists(path: string): boolean {
 		return this.app.vault.getAbstractFileByPath(normalizePath(path)) !== null;
@@ -73,9 +77,24 @@ export class VaultIO {
 		return this.app.vault.createBinary(p, data);
 	}
 
-	/** Respects the user's attachment-folder setting; de-duplicates names. */
-	attachmentPath(filename: string, forNotePath: string): Promise<string> {
-		return this.app.fileManager.getAvailablePathForAttachment(filename, normalizePath(forNotePath));
+	/**
+	 * Path for a new attachment belonging to `forNotePath`. With the plugin's folder template set,
+	 * the folder is created and names are de-duplicated; otherwise Obsidian's own attachment
+	 * setting decides.
+	 */
+	async attachmentPath(filename: string, forNotePath: string): Promise<string> {
+		const template = this.getAttachmentFolder().trim();
+		if (!template) return this.app.fileManager.getAvailablePathForAttachment(filename, normalizePath(forNotePath));
+		const noteFolder = normalizePath(forNotePath).split("/").slice(0, -1).join("/");
+		const folder = normalizePath(template.replace(/\{\{\s*notefolder\s*\}\}/gi, noteFolder).replace(/^\/+/, ""));
+		if (folder) await this.ensureFolder(folder);
+		const dot = filename.lastIndexOf(".");
+		const stem = dot > 0 ? filename.slice(0, dot) : filename;
+		const ext = dot > 0 ? filename.slice(dot) : "";
+		for (let n = 0; ; n++) {
+			const candidate = normalizePath(`${folder ? `${folder}/` : ""}${stem}${n ? ` ${n}` : ""}${ext}`);
+			if (!this.app.vault.getAbstractFileByPath(candidate)) return candidate;
+		}
 	}
 
 	/** Read-modify-write of one section, atomically via `Vault.process`. */

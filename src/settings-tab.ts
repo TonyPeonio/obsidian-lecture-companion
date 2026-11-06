@@ -236,6 +236,16 @@ export class LectureCompanionSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
+			.setName("Attachment folder")
+			.setDesc("Where recordings and downloaded slides are saved. {{notefolder}} is the lecture note's folder, so the default keeps each course's files in Courses/<course>/attachments. Leave empty to use Obsidian's own attachment setting.")
+			.addText((t) =>
+				t.setPlaceholder(DEFAULT_SETTINGS.attachmentFolder).setValue(s.attachmentFolder).onChange(async (v) => {
+					s.attachmentFolder = v.trim();
+					await save();
+				}),
+			);
+
+		new Setting(containerEl)
 			.setName("Stop automatically after (minutes)")
 			.setDesc("Hard limit on one recording, for the day you forget to press stop. Sleeping the laptop also stops and finishes the recording. 0 = no limit.")
 			.addText((t) =>

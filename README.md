@@ -194,6 +194,10 @@ a **remote whisper-server URL**, no process is started and that server is used i
   the same.
 - **Recording the same lecture twice** appends to the Transcript section rather than
   replacing it, so a quick test recording before class does not wipe the real one.
+- **Attachment folder** — recordings and downloaded decks go to `Courses/<course>/attachments`
+  by default (`{{notefolder}}/attachments`). Set any vault path, or leave it empty to follow
+  Obsidian's "Default location for new attachments". Obsidian cannot embed files from hidden
+  (dot) folders, so the folder is a normal one; collapse it in the file explorer.
 - **Course names** — notes are named after what you type in the panel ("CSCI578") when that differs from
   Canvas's title ("Fall 2026 BIOINFORMATICS (CSCI-578-A, …)"); otherwise the Canvas name is used. The first time a typed
   name matches a Canvas course, the pairing is saved under *Course names* in the Canvas
