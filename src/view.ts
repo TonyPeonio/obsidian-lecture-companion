@@ -336,7 +336,7 @@ export class LectureView extends ItemView {
 }
 
 function iconButton(parent: HTMLElement, icon: string, label: string, onClick: () => void): HTMLButtonElement {
-	const btn = parent.createEl("button", { cls: "lc-btn clickable-icon", attr: { "aria-label": label, title: label } });
+	const btn = parent.createEl("button", { cls: "lc-btn clickable-icon", attr: { "aria-label": label } });
 	setIcon(btn, icon);
 	btn.addEventListener("click", onClick);
 	return btn;
