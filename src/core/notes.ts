@@ -316,3 +316,49 @@ export function nestedSectionBody(markdown: string, parentHeading: string, child
 	if (!parent) return null;
 	return sectionBody(lines.slice(parent.bodyStart, parent.bodyEnd).join("\n"), childHeading);
 }
+
+/**
+ * Course-note layout: one `## Lectures` section with a `### YYYY-MM-DD` subheading per day.
+ * Adds the link unless it is already there.
+ */
+export function addLectureLink(markdown: string, date: string, link: string): string {
+	if (markdown.includes(link)) return markdown;
+	return upsertNestedSection(markdown, "## Lectures", date, `- ${link}`, "append");
+}
+
+/**
+ * Converts the pre-0.1.6 layout (`## <date>` → `### Lectures` → links) to the Lectures-first layout.
+ * A date section is removed only when it holds nothing but that lecture list, so notes the user
+ * added under a date are kept.
+ */
+export function migrateCourseIndex(markdown: string): string {
+	const lines = markdown.split("\n");
+	const links: { date: string; link: string }[] = [];
+	const keep: string[] = [];
+	let i = 0;
+	while (i < lines.length) {
+		const line = lines[i] ?? "";
+		const m = /^##\s+(\d{4}-\d{2}-\d{2})\s*$/.exec(line);
+		if (!m) {
+			keep.push(line);
+			i++;
+			continue;
+		}
+		// Collect the section body up to the next ## heading.
+		let j = i + 1;
+		while (j < lines.length && !/^##\s/.test(lines[j] ?? "")) j++;
+		const body = lines.slice(i + 1, j);
+		const nonEmpty = body.map((l) => l.trim()).filter((l) => l.length > 0);
+		const onlyLectures = nonEmpty.length > 0 && nonEmpty[0] === "### Lectures" && nonEmpty.slice(1).every((l) => /^-\s*\[\[.*\]\]\s*$/.test(l));
+		if (onlyLectures) {
+			for (const l of nonEmpty.slice(1)) links.push({ date: m[1] ?? "", link: l.replace(/^-\s*/, "") });
+			i = j;
+		} else {
+			keep.push(...lines.slice(i, j));
+			i = j;
+		}
+	}
+	let out = keep.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+	for (const { date, link } of links.sort((a, b) => a.date.localeCompare(b.date))) out = addLectureLink(out, date, link);
+	return out ? `${out}\n` : out;
+}

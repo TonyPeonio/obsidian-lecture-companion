@@ -2,7 +2,7 @@ import { Modal, Notice, Platform, Plugin, requestUrl, TFile, type App, type Work
 import { describePull, pullSlides } from "./canvas-pull";
 import { CanvasClient, resolveCourse, type CanvasCourse } from "./core/canvas";
 import type { HttpRequest } from "./core/http";
-import { courseNotePath, dateHeading, detectDate, lectureNotePath, renderLectureNote, SECTION_SLIDES, SECTION_TRANSCRIPT, stripFrontmatter, toISODate } from "./core/notes";
+import { addLectureLink, courseNotePath, dateHeading, detectDate, lectureNotePath, migrateCourseIndex, renderLectureNote, SECTION_SLIDES, SECTION_TRANSCRIPT, stripFrontmatter, toISODate } from "./core/notes";
 import { ImportModal, importNotesAsLecture, listImportableNotes } from "./import";
 import { groupEntriesByDate, splitEntries } from "./core/split";
 import { SplitModal, type SplitChoice } from "./split-modal";
@@ -305,17 +305,19 @@ export default class LectureCompanionPlugin extends Plugin {
 		return target;
 	}
 
-	/** Makes sure the course note (`Courses/<course>.md`) lists this lecture under its date heading. Idempotent. */
+	/** Makes sure the course note (`Courses/<course>.md`) lists this lecture under `## Lectures` → `### <date>`. Idempotent. */
 	async ensureCourseLink(course: string, date: string, lecturePath: string): Promise<void> {
 		const coursePath = courseNotePath(this.settings.courseFolder, course);
-		const linkTarget = lecturePath.replace(/\.md$/, "");
-		const existing = this.vault.exists(coursePath) ? await this.vault.read(coursePath) : "";
-		if (existing.includes(`[[${linkTarget}|`) || existing.includes(`[[${linkTarget}]]`)) return;
-		await this.vault.writeSection({ path: coursePath, parentHeading: dateHeading(this.settings.dateHeading, date) }, "Lectures", `- [[${linkTarget}|${date} lecture]]`, "append", "");
+		const link = `[[${lecturePath.replace(/\.md$/, "")}|${date} lecture]]`;
+		const f = this.vault.file(coursePath) ?? (await this.vault.write(coursePath, ""));
+		await this.app.vault.process(f, (md) => addLectureLink(md, date, link));
 	}
 
-	/** Rebuilds the course note's lecture list for one course from the notes on disk, in date order. */
+	/** Rebuilds the course note's lecture list from the notes on disk (and converts the old per-date layout). */
 	async rebuildCourseIndex(course: string): Promise<number> {
+		const coursePath = courseNotePath(this.settings.courseFolder, course);
+		const existing = this.vault.file(coursePath);
+		if (existing) await this.app.vault.process(existing, (md) => migrateCourseIndex(md));
 		const paths = this.vault.lectureNotePaths(this.settings.courseFolder, course).filter((p) => /\/\d{4}-\d{2}-\d{2}\.md$/.test(p)).sort();
 		for (const p of paths) {
 			const date = /(\d{4}-\d{2}-\d{2})\.md$/.exec(p)?.[1];

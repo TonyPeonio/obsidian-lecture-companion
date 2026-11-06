@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+	addLectureLink,
 	courseNotePath,
 	detectDate,
+	migrateCourseIndex,
 	isLectureNote,
 	stripFrontmatter,
 	dateHeading,
@@ -128,6 +130,23 @@ describe("import helpers", () => {
 		expect(stripFrontmatter("no frontmatter")).toBe("no frontmatter");
 		const md = renderLectureNote({ course: "c", date: "2026-11-05", myNotes: "- my bullet" });
 		expect(sectionBody(md, "My notes")).toBe("- my bullet");
+	});
+});
+
+describe("course index", () => {
+	it("adds links under ## Lectures / ### date, once", () => {
+		let md = addLectureLink("", "2026-08-24", "[[Courses/X/2026-08-24|2026-08-24 lecture]]");
+		md = addLectureLink(md, "2026-08-26", "[[Courses/X/2026-08-26|2026-08-26 lecture]]");
+		md = addLectureLink(md, "2026-08-26", "[[Courses/X/2026-08-26|2026-08-26 lecture]]");
+		expect(md).toBe("## Lectures\n\n### 2026-08-24\n\n- [[Courses/X/2026-08-24|2026-08-24 lecture]]\n\n### 2026-08-26\n\n- [[Courses/X/2026-08-26|2026-08-26 lecture]]\n");
+	});
+
+	it("migrates the old per-date layout but keeps date sections with other content", () => {
+		const old = "## 2026-08-26\n### Lectures\n\n- [[Courses/X/2026-08-26|2026-08-26 lecture]]\n\n## 2026-08-24\n### Lectures\n\n- [[Courses/X/2026-08-24|2026-08-24 lecture]]\n\n## 2026-09-01\n### Lectures\n\n- [[Courses/X/2026-09-01|2026-09-01 lecture]]\n\nMy own remark about this day.\n";
+		const md = migrateCourseIndex(old);
+		expect(md).toBe("## 2026-09-01\n### Lectures\n\n- [[Courses/X/2026-09-01|2026-09-01 lecture]]\n\nMy own remark about this day.\n\n## Lectures\n\n### 2026-08-24\n\n- [[Courses/X/2026-08-24|2026-08-24 lecture]]\n\n### 2026-08-26\n\n- [[Courses/X/2026-08-26|2026-08-26 lecture]]\n");
+		expect(migrateCourseIndex(md)).toBe(md);
+		expect(migrateCourseIndex("")).toBe("");
 	});
 });
 

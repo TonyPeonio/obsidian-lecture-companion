@@ -16,8 +16,8 @@ summaries through [Ollama](https://ollama.com).
   course, saves them next to the note, embeds them, and extracts their text so the summary
   can use it.
 - **One note per lecture.** `Courses/<course>/<date>.md` with Slides, Summary, Transcript and
-  My notes sections; the course note links to each lecture. Or keep everything under date
-  headings inside one note per course.
+  My notes sections; the course note `Courses/<course>.md` lists them under *Lectures* with a
+  heading per date. Or keep everything under date headings inside one note per course.
 - **Summaries that cite timestamps.** Key points, definitions, formulas, announcements and
   review questions, each pointing back to `[mm:ss]` in the transcript.
 
