@@ -335,6 +335,46 @@ export function addLectureLink(markdown: string, date: string, link: string, lis
 }
 
 /**
+ * One sentence for the course note, from a written summary: its "In one sentence" section, else
+ * (summaries written before that section existed) the first Key point or the Overview's first
+ * sentence. Timestamps, markdown emphasis and links are dropped; null when nothing usable.
+ */
+export function oneLineSummary(summary: string): string | null {
+	const pick = (heading: string, firstSentence = false): string | null => {
+		const body = sectionBody(summary, heading);
+		if (!body) return null;
+		const line = body.split("\n").map((l) => l.trim()).find((l) => l.length > 0 && !/^_[^_]*_$/.test(l));
+		if (!line) return null;
+		let text = line.replace(/^[-*+]\s+(?:\[[ xX]\]\s+)?/, "");
+		if (firstSentence) text = /^.*?[.!?](?=\s|$)/.exec(text)?.[0] ?? text;
+		return text;
+	};
+	const raw = pick("In one sentence") ?? pick("Key points") ?? pick("Overview", true);
+	if (!raw) return null;
+	const clean = raw
+		.replace(/\s*\[\d{1,2}:\d{2}(?::\d{2})?\]/g, "")
+		.replace(/\[\[([^\]|]*\|)?([^\]]*)\]\]/g, "$2")
+		.replace(/\*\*|__|`/g, "")
+		.replace(/\s+/g, " ")
+		.trim();
+	if (!clean) return null;
+	return clean.length > 240 ? `${clean.slice(0, 237).replace(/\s+\S*$/, "")}…` : clean;
+}
+
+/** Puts ` — sentence` after the lecture link in the course note's list (replacing an earlier one). Unchanged when the link is not there. */
+export function setLectureLinkSummary(markdown: string, link: string, sentence: string): string {
+	const one = sentence.replace(/\s+/g, " ").trim();
+	return markdown
+		.split("\n")
+		.map((line) => {
+			const at = line.indexOf(link);
+			if (at < 0 || !/^\s*[-*+]\s+$/.test(line.slice(0, at))) return line;
+			return `${line.slice(0, at)}${link}${one ? ` — ${one}` : ""}`;
+		})
+		.join("\n");
+}
+
+/**
  * Converts the pre-0.1.6 layout (`## <date>` → `### Lectures` → links) to the Lectures-first layout.
  * A date section is removed only when it holds nothing but that lecture list, so notes the user
  * added under a date are kept.

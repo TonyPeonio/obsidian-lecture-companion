@@ -9,6 +9,8 @@ export interface SlideCandidate {
 	/** Extracted text; empty when the deck is image-only or extraction failed. */
 	text: string;
 	moduleName?: string;
+	/** Text of the Canvas page link that points at the file ("slides"), when it was found on a page. */
+	linkText?: string;
 	/** ISO timestamp of the last change in Canvas. */
 	updatedAt: string;
 }
@@ -99,9 +101,11 @@ const NOT_DECK_WORDS = /\b(homework|hw|assignment|assign|worksheet|exercise|exer
  * Name words decide when they are unambiguous; otherwise the PDF page structure does:
  * decks have many pages with little text per page and short lines.
  */
-export function slideLikeness(name: string, text: string): number {
+export function slideLikeness(name: string, text: string, linkText = ""): number {
 	const base = name.replace(/\.[a-z0-9]+$/i, "");
 	const ext = name.toLowerCase().split(".").pop() ?? "";
+	// The page saying "slides" next to the link is as good a sign as the file name saying it.
+	if (linkText && DECK_WORDS.test(linkText) && !NOT_DECK_WORDS.test(linkText)) return 1;
 	const positive = DECK_WORDS.test(base);
 	const negative = NOT_DECK_WORDS.test(base);
 	if (negative && !positive) return -1;
@@ -129,7 +133,8 @@ export function rankSlides(transcript: string, candidates: SlideCandidate[], opt
 		const similarity = sims[i] ?? 0;
 		if (!c.text.trim()) reasons.push("no text in file");
 		else if (hasTranscript) reasons.push(`${Math.round(similarity * 100)}% match with transcript`);
-		const likeness = slideLikeness(c.name, c.text);
+		const likeness = slideLikeness(c.name, c.text, c.linkText);
+		if (c.linkText) reasons.push(`linked as “${c.linkText}”`);
 		if (likeness <= -0.5) reasons.push("does not look like a deck");
 		else if (likeness >= 0.5) reasons.push("looks like a deck");
 		if (previous.has(c.name.toLowerCase())) reasons.push("used in an earlier lecture");

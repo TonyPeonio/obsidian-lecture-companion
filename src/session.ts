@@ -394,6 +394,11 @@ export class LectureSession {
 			);
 			this.summary = text;
 			await this.plugin.vault.writeSection(target, SECTION_SUMMARY, text || "_The model returned an empty summary._", "replace");
+			// The course note lists each day with a one-sentence summary next to its link.
+			const noteDate = /(\d{4}-\d{2}-\d{2})\.md$/.exec(target.path)?.[1];
+			if (text && !target.parentHeading && noteDate) {
+				await this.plugin.ensureCourseLink(series, noteDate, target.path, text).catch((err: Error) => new Notice(`Could not update the course note: ${err.message}`, 6000));
+			}
 			// A meeting's action items also go to the series note's TODO list (already-listed ones are skipped).
 			if (kind === "meeting" && text) {
 				const items = extractTodos(sectionBody(text, "Action items") ?? "").todos;

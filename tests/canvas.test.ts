@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CanvasClient, CanvasError, nextLink, resolveCourse } from "../src/core/canvas";
+import { CanvasClient, CanvasError, fileLinksInHtml, nextLink, resolveCourse } from "../src/core/canvas";
 import type { HttpRequest, HttpRequestOptions } from "../src/core/http";
 
 function fakeCanvas() {
@@ -79,6 +79,40 @@ describe("CanvasClient", () => {
 		// Modules also forbidden → one combined error.
 		routes.set("/api/v1/courses/2/modules?include%5B%5D=items&per_page=50", { status: 403, body: { errors: [{ message: "nope" }] } });
 		await expect(client.listFiles(2, {})).rejects.toThrow(/Neither the Files area nor Modules/);
+	});
+
+	it("finds a deck linked as 'slides' on a module page when Files and the Pages list are hidden", async () => {
+		const { client, routes } = fakeCanvas();
+		const forbidden = { status: 403, body: { errors: [{ message: "user not authorized to perform that action" }] } };
+		routes.set(
+			"/api/v1/courses/3/files?sort=updated_at&order=desc&per_page=50&content_types%5B%5D=application%2Fpdf&content_types%5B%5D=application%2Fvnd.openxmlformats-officedocument.presentationml.presentation&content_types%5B%5D=application%2Fvnd.ms-powerpoint",
+			forbidden,
+		);
+		routes.set("/api/v1/courses/3/modules?include%5B%5D=items&per_page=50", {
+			body: [{ name: "Week 9", items: [{ type: "Page", title: "Unsupervised Learning - Overview", page_url: "unsupervised-learning-overview" }] }],
+		});
+		routes.set("/api/v1/courses/3/pages?include%5B%5D=body&per_page=50", forbidden);
+		routes.set("/api/v1/courses/3/pages/unsupervised-learning-overview", {
+			body: {
+				title: "Unsupervised Learning - Overview",
+				body: '<h2>LECTURE</h2><p>Unsupervised Learning - <a class="instructure_file_link" title="unsupervised.pdf" href="https://school.test/courses/3/files/555?wrap=1" data-api-endpoint="https://school.test/api/v1/courses/3/files/555" data-api-returntype="File">slides</a></p><p><a href="https://example.org/reading">Reading</a></p>',
+			},
+		});
+		routes.set("/api/v1/courses/3/files/555", {
+			body: { id: 555, display_name: "unsupervised.pdf", filename: "unsupervised.pdf", "content-type": "application/pdf", size: 1, updated_at: "2026-10-20T09:00:00Z", created_at: "2026-10-20T09:00:00Z", url: "https://x/u?verifier=1" },
+		});
+		const files = await client.listFiles(3, {});
+		expect(files.map((f) => [f.id, f.source, f.moduleName, f.linkText])).toEqual([[555, "pages", "Week 9 › Unsupervised Learning - Overview", "slides"]]);
+	});
+
+	it("fileLinksInHtml reads anchors, embeds and cross-course links once each", () => {
+		const html =
+			'<a href="/courses/7/files/1/download?download_frd=1">Lecture <b>slides</b></a> <a href="/courses/7/files/1">again</a> <img src="/courses/8/files/2/preview"> <a href="/courses/7/files">all files</a> <a href="/users/5/files/3">x</a>';
+		expect(fileLinksInHtml(html)).toEqual([
+			{ fileId: 1, courseId: 7, text: "Lecture slides" },
+			{ fileId: 3, courseId: undefined, text: "x" },
+			{ fileId: 2, courseId: 8, text: "" },
+		]);
 	});
 
 	it("downloads without the bearer header and reports lock/404", async () => {

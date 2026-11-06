@@ -31,6 +31,8 @@ function systemPrompt(source: "transcript" | "notes"): string {
 ${given}
 Write in markdown, in the language of the lecture. Do not invent content that is not in ${material}. Do not add a title or front matter.
 Output exactly these sections:
+### In one sentence
+One plain sentence (at most 25 words, no timestamp) saying what this lecture covered.
 ### Key points
 5 to 12 bullets covering what was taught, in lecture order.${timestamps}
 ### Terms and definitions
@@ -54,6 +56,8 @@ function meetingPrompt(source: "transcript" | "notes"): string {
 ${given}
 Write in markdown, in the language of the meeting. Do not invent content that is not in ${material}. Do not add a title or front matter.
 Output exactly these sections:
+### In one sentence
+One plain sentence (at most 25 words, no timestamp) saying what this meeting was about and its main outcome.
 ### Overview
 2 to 4 sentences: what the meeting was for and where things stand now.
 ### Discussion

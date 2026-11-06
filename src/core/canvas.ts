@@ -21,9 +21,42 @@ export interface CanvasFile {
 	/** Download URL; carries a `verifier` token so no auth header is needed (or allowed). */
 	url: string;
 	locked: boolean;
-	/** Where it was found. Module items carry the module name for context. */
-	source: "files" | "modules";
+	/** Where it was found. Module items carry the module name for context; page links the page title too. */
+	source: "files" | "modules" | "pages";
 	moduleName?: string;
+	/** Text of the link on a Canvas page that points at this file (e.g. "slides"). */
+	linkText?: string;
+}
+
+/** A Canvas file referenced from a page body: `/courses/12/files/345`, `/files/345/download`, API endpoints. */
+export interface PageFileLink {
+	fileId: number;
+	/** Course id in the link, when it names one (cross-listed courses can point at another course's files). */
+	courseId?: number;
+	text: string;
+}
+
+/** Finds links to Canvas files in a page's HTML (anchors and embeds), one per file id, with the link text. */
+export function fileLinksInHtml(html: string): PageFileLink[] {
+	const out = new Map<number, PageFileLink>();
+	const ref = /(?:\/courses\/(\d+))?\/files\/(\d+)(?![\d])/;
+	// Anchors first, so a file gets its visible link text ("slides") rather than an empty one.
+	for (const m of html.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi)) {
+		const attrs = m[1] ?? "";
+		const r = ref.exec(attrs);
+		if (!r) continue;
+		const fileId = Number(r[2]);
+		if (out.has(fileId)) continue;
+		const text = (m[2] ?? "").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
+		out.set(fileId, { fileId, courseId: r[1] ? Number(r[1]) : undefined, text });
+	}
+	for (const m of html.matchAll(/(?:href|src|data-api-endpoint)\s*=\s*"([^"]*)"/gi)) {
+		const r = ref.exec(m[1] ?? "");
+		if (!r) continue;
+		const fileId = Number(r[2]);
+		if (!out.has(fileId)) out.set(fileId, { fileId, courseId: r[1] ? Number(r[1]) : undefined, text: "" });
+	}
+	return [...out.values()];
 }
 
 export class CanvasError extends Error {
@@ -50,9 +83,21 @@ export interface ListFilesOptions {
 	search?: string;
 	contentTypes?: string[];
 	includeModules?: boolean;
+	/** Also collect files linked from the course's Pages (e.g. a "slides" link on a weekly page). Default true. */
+	includePages?: boolean;
 }
 
+/** Most pages read one by one when the Pages list is hidden from students. */
+const MAX_PAGE_FETCHES = 100;
+
 type Json = Record<string, unknown>;
+
+/** A Page item inside a module. */
+export interface ModulePage {
+	pageUrl: string;
+	moduleName: string;
+	title: string;
+}
 
 export class CanvasClient {
 	constructor(
@@ -108,10 +153,11 @@ export class CanvasClient {
 				throw err;
 			}
 		}
+		let modulePages: ModulePage[] = [];
 		if (opts.includeModules ?? true) {
 			let items: { fileId: number; moduleName: string; title: string }[];
 			try {
-				items = await this.listModuleFileItems(courseId);
+				({ files: items, pages: modulePages } = await this.listModuleItems(courseId));
 			} catch (err) {
 				if (filesError) throw new CanvasError(`Neither the Files area nor Modules are accessible for this course (${filesError.message}; ${(err as Error).message})`, filesError.status);
 				throw err;
@@ -134,6 +180,25 @@ export class CanvasClient {
 				}
 			}
 		}
+		if (opts.includePages ?? true) {
+			// Courses often post the deck as a link on a weekly page ("Lecture: … - slides") rather
+			// than as a module item. Page problems never fail the listing; those files are a bonus.
+			for (const link of await this.listPageFileLinks(courseId, modulePages)) {
+				const existing = byId.get(link.fileId);
+				if (existing) {
+					existing.linkText = existing.linkText || link.text || undefined;
+					existing.moduleName = existing.moduleName ?? link.where;
+					continue;
+				}
+				const f = await this.linkedFile(courseId, link);
+				if (f && (types.length === 0 || types.includes(f.contentType))) {
+					f.source = "pages";
+					f.moduleName = link.where;
+					f.linkText = link.text || undefined;
+					byId.set(f.id, f);
+				}
+			}
+		}
 		let files = [...byId.values()];
 		if (opts.since || opts.until) {
 			files = files.filter((f) => {
@@ -147,8 +212,14 @@ export class CanvasClient {
 	}
 
 	async listModuleFileItems(courseId: number): Promise<{ fileId: number; moduleName: string; title: string }[]> {
+		return (await this.listModuleItems(courseId)).files;
+	}
+
+	/** File items and Page items of every module. */
+	async listModuleItems(courseId: number): Promise<{ files: { fileId: number; moduleName: string; title: string }[]; pages: ModulePage[] }> {
 		const modules = await this.getAll(`/api/v1/courses/${courseId}/modules`, { "include[]": "items", per_page: "50" });
 		const out: { fileId: number; moduleName: string; title: string }[] = [];
+		const pages: ModulePage[] = [];
 		for (const mod of modules) {
 			const moduleName = typeof mod.name === "string" ? mod.name : "";
 			let items = Array.isArray(mod.items) ? (mod.items as Json[]) : null;
@@ -159,10 +230,64 @@ export class CanvasClient {
 			for (const item of items ?? []) {
 				if (item.type === "File" && item.content_id !== undefined) {
 					out.push({ fileId: Number(item.content_id), moduleName, title: typeof item.title === "string" ? item.title : "" });
+				} else if (item.type === "Page" && typeof item.page_url === "string") {
+					pages.push({ pageUrl: item.page_url, moduleName, title: typeof item.title === "string" ? item.title : item.page_url });
 				}
 			}
 		}
+		return { files: out, pages };
+	}
+
+	/**
+	 * Files linked from the course's pages. Reads every page body through the Pages list in one
+	 * paginated call; when that list is hidden from students, reads the pages that Modules link to
+	 * one by one. `where` is "Module › Page title" (or just the page title) for the picker label.
+	 */
+	async listPageFileLinks(courseId: number, modulePages: ModulePage[]): Promise<(PageFileLink & { where: string })[]> {
+		const moduleOf = new Map(modulePages.map((p) => [p.pageUrl, p.moduleName]));
+		const bodies = new Map<string, { title: string; body: string }>();
+		try {
+			for (const row of await this.getAll(`/api/v1/courses/${courseId}/pages`, { "include[]": "body", per_page: "50" })) {
+				if (typeof row.url === "string" && typeof row.body === "string") bodies.set(row.url, { title: str(row.title) || row.url, body: row.body });
+			}
+		} catch (err) {
+			if (!(err instanceof CanvasError)) throw err;
+		}
+		let fetched = 0;
+		for (const page of modulePages) {
+			if (bodies.has(page.pageUrl) || fetched >= MAX_PAGE_FETCHES) continue;
+			fetched++;
+			try {
+				const row = await this.getOne(`/api/v1/courses/${courseId}/pages/${encodeURIComponent(page.pageUrl)}`);
+				if (typeof row.body === "string") bodies.set(page.pageUrl, { title: str(row.title) || page.title, body: row.body });
+			} catch (err) {
+				if (!(err instanceof CanvasError)) throw err;
+			}
+		}
+		const out: (PageFileLink & { where: string })[] = [];
+		const seen = new Set<number>();
+		for (const [url, { title, body }] of bodies) {
+			const mod = moduleOf.get(url);
+			const where = mod ? `${mod} › ${title}` : title;
+			for (const link of fileLinksInHtml(body)) {
+				if (seen.has(link.fileId)) continue;
+				seen.add(link.fileId);
+				out.push({ ...link, where });
+			}
+		}
 		return out;
+	}
+
+	/** Metadata of a file linked from a page; null when it is not readable. Tries the linking course, then the file id alone. */
+	private async linkedFile(courseId: number, link: PageFileLink): Promise<CanvasFile | null> {
+		for (const path of [`/api/v1/courses/${link.courseId ?? courseId}/files/${link.fileId}`, `/api/v1/files/${link.fileId}`]) {
+			try {
+				return toFile(await this.getOne(path), "pages");
+			} catch (err) {
+				if (!(err instanceof CanvasError)) throw err;
+			}
+		}
+		return null;
 	}
 
 	async getFile(fileId: number): Promise<CanvasFile> {

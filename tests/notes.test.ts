@@ -4,6 +4,8 @@ import {
 	courseNotePath,
 	detectDate,
 	migrateCourseIndex,
+	oneLineSummary,
+	setLectureLinkSummary,
 	addTodos,
 	ensureTodoSection,
 	extractTodos,
@@ -27,6 +29,30 @@ import {
 } from "../src/core/notes";
 import { buildSummaryMessages, fitToContext, stripThinkTags } from "../src/core/summarize";
 import { addCourseAlias, addMeeting, courseNoteOverride, DEFAULT_SETTINGS, meetingList, parseCourseNotes, parseKeyValueLines, setCourseAlias, vaultCourseName } from "../src/settings";
+
+describe("one-sentence summaries in the course note", () => {
+	it("takes the In one sentence section, else the first key point or overview sentence", () => {
+		expect(oneLineSummary("### In one sentence\nClustering, density estimation and PCA as ways to find structure without labels.\n\n### Key points\n- k-means [12:03]")).toBe(
+			"Clustering, density estimation and PCA as ways to find structure without labels.",
+		);
+		expect(oneLineSummary("### Key points\n- **Unsupervised learning** finds patterns in [[Unlabeled data|unlabeled data]] [03:15]\n- second")).toBe("Unsupervised learning finds patterns in unlabeled data");
+		expect(oneLineSummary("### Overview\nWe planned the robot. Budget is open.\n\n### Discussion\n- x")).toBe("We planned the robot.");
+		expect(oneLineSummary("_No summary yet._")).toBeNull();
+	});
+
+	it("writes the sentence after the day's link and replaces an older one", () => {
+		const link = "[[Courses/ML/2026-08-24|2026-08-24 lecture]]";
+		let md = addLectureLink("", "2026-08-24", link);
+		md = addLectureLink(md, "2026-08-26", "[[Courses/ML/2026-08-26|2026-08-26 lecture]]");
+		md = setLectureLinkSummary(md, link, "Course logistics and what machine learning is.");
+		expect(md).toContain(`- ${link} — Course logistics and what machine learning is.`);
+		md = setLectureLinkSummary(md, link, "Updated.");
+		expect(md).toContain(`- ${link} — Updated.`);
+		expect(md).not.toContain("Course logistics");
+		expect(md).toContain("- [[Courses/ML/2026-08-26|2026-08-26 lecture]]\n");
+		expect(addLectureLink(md, "2026-08-24", link)).toBe(md);
+	});
+});
 
 describe("meetings", () => {
 	it("renders a meeting note with the meeting tag and no Slides section", () => {

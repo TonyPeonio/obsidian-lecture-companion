@@ -2,7 +2,7 @@ import { Modal, Notice, Platform, Plugin, requestUrl, TFile, type App, type Work
 import { describePull, pullSlides } from "./canvas-pull";
 import { CanvasClient, resolveCourse, type CanvasCourse } from "./core/canvas";
 import type { HttpRequest } from "./core/http";
-import { addLectureLink, addTodos, courseNotePath, ensureTodoSection, extractTodos, replaceAttachmentRefs, SECTION_MY_NOTES, dateHeading, detectDate, lectureNotePath, migrateCourseIndex, renderLectureNote, safeFileName, SECTION_SLIDES, SECTION_TRANSCRIPT, stripFrontmatter, toISODate, type NoteKind } from "./core/notes";
+import { addLectureLink, addTodos, courseNotePath, ensureTodoSection, extractTodos, replaceAttachmentRefs, SECTION_MY_NOTES, dateHeading, detectDate, lectureNotePath, migrateCourseIndex, oneLineSummary, renderLectureNote, safeFileName, SECTION_SLIDES, SECTION_SUMMARY, setLectureLinkSummary, SECTION_TRANSCRIPT, stripFrontmatter, toISODate, type NoteKind } from "./core/notes";
 import { ImportModal, importNotesAsLecture, listImportableNotes } from "./import";
 import { groupEntriesByDate, splitEntries } from "./core/split";
 import { SplitModal, type SplitChoice } from "./split-modal";
@@ -388,12 +388,17 @@ export default class LectureCompanionPlugin extends Plugin {
 	}
 
 	/** Makes sure the course note (`Courses/<course>.md`) lists this lecture under `## Lectures` → `### <date>` (`## Meetings` for a meeting series). Idempotent. */
-	async ensureCourseLink(course: string, date: string, lecturePath: string): Promise<void> {
+	async ensureCourseLink(course: string, date: string, lecturePath: string, summary?: string): Promise<void> {
 		const meeting = this.isMeeting(course);
 		const coursePath = courseNotePath(this.folderFor(course), course);
 		const link = `[[${lecturePath.replace(/\.md$/, "")}|${date} ${meeting ? "meeting" : "lecture"}]]`;
+		// The day's one-sentence summary goes after the link, so the course note reads as an outline.
+		const sentence = summary ? oneLineSummary(summary) : null;
 		const f = this.vault.file(coursePath) ?? (await this.vault.write(coursePath, ""));
-		await this.app.vault.process(f, (md) => ensureTodoSection(addLectureLink(md, date, link, meeting ? "## Meetings" : "## Lectures")));
+		await this.app.vault.process(f, (md) => {
+			const out = ensureTodoSection(addLectureLink(md, date, link, meeting ? "## Meetings" : "## Lectures"));
+			return sentence ? setLectureLinkSummary(out, link, sentence) : out;
+		});
 	}
 
 	/** Moves task lines into the course note's `## TODO` section. Returns how many were added. */
@@ -437,7 +442,9 @@ export default class LectureCompanionPlugin extends Plugin {
 		const paths = this.vault.lectureNotePaths(this.folderFor(course), course).filter((p) => /\/\d{4}-\d{2}-\d{2}\.md$/.test(p)).sort();
 		for (const p of paths) {
 			const date = /(\d{4}-\d{2}-\d{2})\.md$/.exec(p)?.[1];
-			if (date) await this.ensureCourseLink(course, date, p);
+			if (!date) continue;
+			const summary = (await this.vault.readSection({ path: p }, SECTION_SUMMARY)) ?? "";
+			await this.ensureCourseLink(course, date, p, summary);
 		}
 		return paths.length;
 	}

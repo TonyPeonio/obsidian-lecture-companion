@@ -17,8 +17,10 @@ summaries through [Ollama](https://ollama.com).
   can use it.
 - **One note per lecture.** `Courses/<course>/<date>.md` with Slides, Summary, Transcript and
   My notes sections; the course note `Courses/<course>.md` lists them under *Lectures* with a
-  heading per date and keeps a *TODO* list. Or keep everything under date headings inside one
-  note per course.
+  heading per date, each link followed by a one-sentence summary of that day, and keeps a
+  *TODO* list. Or keep everything under date headings inside one note per course. For lectures
+  summarized before 0.1.12, run **Rebuild course note links** to add the sentences (taken from
+  each note's first key point; re-summarize a note for a proper one-sentence summary).
 - **Summaries that cite timestamps.** Key points, definitions, formulas, announcements and
   review questions, each pointing back to `[mm:ss]` in the transcript.
 
@@ -140,9 +142,10 @@ Click the microphone in the ribbon or run **Lecture Companion: Open panel**.
    Summary section. For the next class, press **new recording** (or just type the other
    course and press record): the panel clears and the previous lecture stays in its note.
 4. Before the summary, the plugin **matches slides to the lecture**: it ranks every deck in the
-   Canvas course by how much its text overlaps the transcript and by whether it looks like a
-   deck rather than a worksheet, syllabus or paper (file type, words in the name, page
-   structure); upload dates are ignored. It shows a picker with the best match
+   Canvas course (from the Files area, Modules, and links on the course's Pages, such as a
+   "slides" link on a weekly overview page) by how much its text overlaps the transcript and by
+   whether it looks like a deck rather than a worksheet, syllabus or paper (file type, words in
+   the name or in the page link, page structure); upload dates are ignored. It shows a picker with the best match
    checked. Confirm, and the deck is embedded under *Slides* with its text in a folded
    callout, so the summary can use them. Set *Match slides to the lecture* to *Automatic* to
    skip the picker when one deck clearly wins, or *Off*.
@@ -283,7 +286,7 @@ a **remote whisper-server URL**, no process is started and that server is used i
 | Transcript falls further and further behind | The CPU cannot keep up with the model. Use `large-v3-turbo-q8_0` or `small`, make sure *Threads* is 0 (all cores), and close other heavy programs. The bar turns orange when the lag passes a minute. |
 | Transcript is empty while the mic level moves | Wrong microphone selected (Settings → Recording → Microphone), or the language setting does not match the lecture (`auto` detects it). |
 | Summary fails with *"Cannot reach Ollama"* | Ollama is not running, or the URL points to another machine that is not reachable. Click **Test** next to the Ollama URL. |
-| Pull says *unauthorized* / *no permission* for a course | The course hides its Files tab from students. The plugin then falls back to files attached to Modules, which are readable when published. If a course posts slides only through Announcements or Pages, those are not collected yet. |
+| Pull says *unauthorized* / *no permission* for a course | The course hides its Files tab from students. The plugin then falls back to files attached to Modules and files linked from the course's Pages (e.g. a "slides" link on a weekly page), which are readable when published. Slides posted only in Announcements are not collected yet. |
 | Pull finds nothing although slides were posted | The file was uploaded on another day than you pulled for. Raise *Look back (days)* in the Canvas settings, or use *Pull Canvas slides for a date…*. |
 | Summary says the transcript is empty | The Transcript section holds only placeholders or an audio embed. Record first; a very short test recording with no speech produces no transcript. |
 | Canvas **Test** says *rejected the access token (401)* | The token was pasted incompletely or has expired. Generate a new one in Canvas and paste it again. |

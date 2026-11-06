@@ -141,7 +141,7 @@ export class SlideMatcher {
 				cache.entries[key] = { updatedAt: file.updatedAt, name: file.displayName, text };
 				dirty = true;
 			}
-			candidates.push({ id: file.id, name: file.displayName, text, moduleName: file.moduleName, updatedAt: file.updatedAt });
+			candidates.push({ id: file.id, name: file.displayName, text, moduleName: file.moduleName, linkText: file.linkText, updatedAt: file.updatedAt });
 		}
 		if (dirty) await this.saveCache(cache);
 		return { candidates, files };

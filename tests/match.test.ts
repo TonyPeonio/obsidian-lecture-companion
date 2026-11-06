@@ -46,6 +46,9 @@ describe("slideLikeness", () => {
 		expect(slideLikeness("Lecture 12 - Hashing.pdf", "")).toBe(1);
 		expect(slideLikeness("TranscriptomeAnalysis_Part6_tSNE.pptx", "")).toBe(1);
 		expect(slideLikeness("anything.pptx", "")).toBe(1);
+		// A page that links the file as "slides" vouches for it, whatever the file is called.
+		expect(slideLikeness("unsupervised.pdf", "dense text ".repeat(400), "slides")).toBe(1);
+		expect(slideLikeness("unsupervised.pdf", "dense text ".repeat(400), "homework solutions")).toBeLessThan(1);
 		expect(slideLikeness("HW4 sorting worksheet.pdf", deckText(20, "x"))).toBe(-1);
 		expect(slideLikeness("Syllabus.pdf", "")).toBe(-1);
 		expect(slideLikeness("Problem Set 3 solutions.pdf", "")).toBe(-1);
