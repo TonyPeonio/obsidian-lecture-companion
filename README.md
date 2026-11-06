@@ -77,6 +77,20 @@ the plugin's *whisper-server binary* setting.
 **Option C — Scoop.** If you already use [Scoop](https://scoop.sh): `scoop install whisper-cpp`.
 If Windows says *"'scoop' is not recognized"*, Scoop is not installed; use option A instead.
 
+**Have an NVIDIA card?** Use the CUDA build; it transcribes 10× faster than the CPU build and
+`large-v3-turbo` runs many times faster than real time. Run the script with `-Cuda`
+(it downloads the 650 MB `whisper-bin-win-cuda-12.4.0-x64.zip`, which bundles the CUDA
+runtime; any NVIDIA driver from 2024 or later works):
+
+```
+powershell -NoProfile -ExecutionPolicy Bypass -File "%USERPROFILE%\Downloads\install-whisper-windows.ps1" -Cuda
+```
+
+Then add `-fa` under *Extra whisper-server arguments* in the plugin settings (flash attention,
+faster on GPUs). If you had the CPU build installed through Scoop, also clear the *whisper-server
+binary* path or set it to `%LOCALAPPDATA%\whisper.cpp\whisper-server.exe`, because the Scoop
+copy is found first.
+
 Things that trip people up:
 
 - **Command Prompt vs PowerShell.** Commands starting with `$` or `Set-ExecutionPolicy` are
@@ -148,8 +162,18 @@ a **remote whisper-server URL**, no process is started and that server is used i
 
 ## Settings worth knowing
 
-- **Threads** — 0 uses every logical CPU. Whisper scales well; on an 8-core/16-thread laptop
-  `large-v3-turbo` runs faster than real time.
+- **Threads** — 0 uses one thread per physical core, which is what whisper.cpp runs fastest
+  with; adding hyper-threads makes it slower. If the transcript keeps falling behind on a CPU
+  build, switch to `large-v3-turbo-q8_0` (about 1.5× faster, nearly the same accuracy) or
+  `large-v3-turbo-q5_0`, or use the CUDA build on a PC with an NVIDIA card.
+- **Stop automatically** — two safety nets for forgotten recordings. *Stop after* (default
+  180 min) is a hard limit; *Stop after silence* (default 15 min) stops when nobody has
+  spoken for that long, so set it longer than the quiet stretches in your classes. Closing the
+  laptop lid also ends the recording: when the machine wakes, the plugin notices the clock
+  jump, stops, finishes the transcript and writes the note. A microphone being unplugged does
+  the same.
+- **Recording the same lecture twice** appends to the Transcript section rather than
+  replacing it, so a quick test recording before class does not wipe the real one.
 - **Maximum chunk length** — shorter chunks show text sooner but give Whisper less context.
   20 s is a good default; 10–12 s if you want it snappier.
 - **Layout** — *One note per lecture* (recommended; transcripts are long) or *Sections in the
@@ -171,6 +195,9 @@ a **remote whisper-server URL**, no process is started and that server is used i
 | Transcript falls further and further behind | The CPU cannot keep up with the model. Use `large-v3-turbo-q8_0` or `small`, make sure *Threads* is 0 (all cores), and close other heavy programs. The bar turns orange when the lag passes a minute. |
 | Transcript is empty while the mic level moves | Wrong microphone selected (Settings → Recording → Microphone), or the language setting does not match the lecture (`auto` detects it). |
 | Summary fails with *"Cannot reach Ollama"* | Ollama is not running, or the URL points to another machine that is not reachable. Click **Test** next to the Ollama URL. |
+| Pull says *unauthorized* / *no permission* for a course | The course hides its Files tab from students. The plugin then falls back to files attached to Modules, which are readable when published. If a course posts slides only through Announcements or Pages, those are not collected yet. |
+| Pull finds nothing although slides were posted | The file was uploaded on another day than you pulled for. Raise *Look back (days)* in the Canvas settings, or use *Pull Canvas slides for a date…*. |
+| Summary says the transcript is empty | The Transcript section holds only placeholders or an audio embed. Record first; a very short test recording with no speech produces no transcript. |
 | Canvas **Test** says *rejected the access token (401)* | The token was pasted incompletely or has expired. Generate a new one in Canvas and paste it again. |
 | Canvas **Test** says *not found (404)* | The Canvas URL is wrong. It must be the address you log in at, e.g. `https://school.instructure.com`, with no path after it. |
 

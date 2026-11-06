@@ -26,6 +26,16 @@ export function cpuCount(): number {
 	return n > 0 ? n : 4;
 }
 
+/**
+ * whisper.cpp runs fastest with one thread per physical core; hyper-threads add contention.
+ * Node cannot see physical cores, so assume SMT on x86 with 8+ logical CPUs (Apple silicon has none).
+ */
+export function defaultThreads(): number {
+	const logical = cpuCount();
+	if (process.platform === "darwin" || logical < 8) return logical;
+	return Math.max(4, Math.floor(logical / 2));
+}
+
 export function nodeLocateDeps(): LocateDeps {
 	return {
 		platform: process.platform,

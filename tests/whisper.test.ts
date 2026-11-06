@@ -3,7 +3,7 @@ import type { HttpRequest, HttpRequestOptions } from "../src/core/http";
 import { parseWhisperResponse, transcribeWav, WhisperError } from "../src/core/whisper/client";
 import { candidatePaths, installHint, locateWhisperServer } from "../src/core/whisper/locate";
 import { downloadModel, findModel, isModelInstalled, modelUrl, WHISPER_MODELS, type DownloadDeps } from "../src/core/whisper/models";
-import { buildServerArgs, WhisperServerManager, type ProcessHandle, type ServerConfig, type ServerState } from "../src/core/whisper/server";
+import { buildServerArgs, parseExtraArgs, WhisperServerManager, type ProcessHandle, type ServerConfig, type ServerState } from "../src/core/whisper/server";
 
 describe("whisper client", () => {
 	it("posts multipart WAV to /inference and parses verbose_json", async () => {
@@ -202,6 +202,9 @@ describe("WhisperServerManager", () => {
 		expect(h.spawned[0]?.handle.killed).toBe(true);
 		expect(h.spawned[1]?.args.slice(-3)).toEqual(["--vad", "-vm", "/m/vad.bin"]);
 		expect(buildServerArgs({ ...h.cfg, threads: 0.5 }, 1)).toContain("1");
+		expect(buildServerArgs({ ...h.cfg, extraArgs: ["-fa", "-p", "2"] }, 1).slice(-3)).toEqual(["-fa", "-p", "2"]);
+		expect(parseExtraArgs('  -fa -p 2 --public "C:\\My Folder" ')).toEqual(["-fa", "-p", "2", "--public", "C:\\My Folder"]);
+		expect(parseExtraArgs("")).toEqual([]);
 	});
 
 	it("fails clearly when the binary or model is missing", async () => {

@@ -25,8 +25,8 @@ export interface PullOptions {
 export async function pullSlides(plugin: LectureCompanionPlugin, opts: PullOptions): Promise<PullResult[]> {
 	const canvas = plugin.canvas;
 	if (!canvas.configured) throw new Error("Set the Canvas URL and access token in settings first.");
-	const since = startOfDay(opts.date);
-	const until = addDays(since, 1);
+	const until = addDays(startOfDay(opts.date), 1);
+	const since = addDays(until, -Math.max(1, plugin.settings.lookbackDays));
 	const courses = opts.course ? [opts.course] : await plugin.refreshCourses();
 	const results: PullResult[] = [];
 	for (const course of courses) {

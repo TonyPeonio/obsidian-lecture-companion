@@ -62,6 +62,25 @@ describe("CanvasClient", () => {
 		]);
 	});
 
+	it("falls back to Module files when the Files tab is forbidden", async () => {
+		const { client, routes } = fakeCanvas();
+		routes.set(
+			"/api/v1/courses/2/files?sort=updated_at&order=desc&per_page=50&content_types%5B%5D=application%2Fpdf&content_types%5B%5D=application%2Fvnd.openxmlformats-officedocument.presentationml.presentation&content_types%5B%5D=application%2Fvnd.ms-powerpoint",
+			{ status: 403, body: { status: "unauthorized", errors: [{ message: "user not authorized to perform that action" }] } },
+		);
+		routes.set("/api/v1/courses/2/modules?include%5B%5D=items&per_page=50", {
+			body: [{ name: "Week 1", items: [{ type: "File", content_id: 21 }] }],
+		});
+		routes.set("/api/v1/courses/2/files/21", {
+			body: { id: 21, display_name: "Intro.pdf", filename: "intro.pdf", "content-type": "application/pdf", size: 1, updated_at: "2026-11-05T09:00:00Z", created_at: "2026-11-05T09:00:00Z", url: "https://x/intro?verifier=1" },
+		});
+		const files = await client.listFiles(2, {});
+		expect(files.map((f) => [f.id, f.source, f.moduleName])).toEqual([[21, "modules", "Week 1"]]);
+		// Modules also forbidden → one combined error.
+		routes.set("/api/v1/courses/2/modules?include%5B%5D=items&per_page=50", { status: 403, body: { errors: [{ message: "nope" }] } });
+		await expect(client.listFiles(2, {})).rejects.toThrow(/Neither the Files area nor Modules/);
+	});
+
 	it("downloads without the bearer header and reports lock/404", async () => {
 		const { client, routes, seen } = fakeCanvas();
 		const bytes = new Uint8Array([1, 2, 3]).buffer;

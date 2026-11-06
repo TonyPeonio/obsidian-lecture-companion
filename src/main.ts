@@ -6,8 +6,8 @@ import { courseNotePath, dateHeading, lectureNotePath, renderLectureNote, toISOD
 import { OllamaClient } from "./core/ollama";
 import { locateWhisperServer } from "./core/whisper/locate";
 import { findModel, modelPath, VAD_MODEL } from "./core/whisper/models";
-import { WhisperServerManager, type ServerConfig, type ServerState } from "./core/whisper/server";
-import { cpuCount, nodeLocateDeps, nodeServerDeps } from "./node/deps";
+import { parseExtraArgs, WhisperServerManager, type ServerConfig, type ServerState } from "./core/whisper/server";
+import { defaultThreads, nodeLocateDeps, nodeServerDeps } from "./node/deps";
 import { LectureSession } from "./session";
 import { courseNoteOverride, DEFAULT_SETTINGS, manualCourseList, type LectureCompanionSettings } from "./settings";
 import { LectureCompanionSettingTab } from "./settings-tab";
@@ -175,9 +175,10 @@ export default class LectureCompanionPlugin extends Plugin {
 		return {
 			binary: s.whisperBinaryPath.trim() || this.cachedBinary,
 			modelPath: model ? modelPath(this.modelsDir, model) : "",
-			threads: s.threads > 0 ? s.threads : cpuCount(),
+			threads: s.threads > 0 ? s.threads : defaultThreads(),
 			language: s.language,
 			vadModelPath: s.useVad ? modelPath(this.modelsDir, VAD_MODEL) : undefined,
+			extraArgs: parseExtraArgs(s.extraServerArgs),
 			remoteUrl: s.remoteWhisperUrl || undefined,
 			idleUnloadMs: s.idleUnloadMinutes * 60_000,
 		};

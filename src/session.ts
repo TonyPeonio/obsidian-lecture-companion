@@ -1,6 +1,7 @@
 // One lecture: microphone → chunker → whisper pipeline → note, then an optional summary.
 // Owned by the plugin so the sidebar view can close and reopen without losing the session.
 
+import { Notice } from "obsidian";
 import { Chunker } from "./core/audio/chunker";
 import { TranscriptionPipeline, type PipelineProgress, type TranscriptSegment } from "./core/audio/pipeline";
 import { safeFileName, SECTION_SLIDES, SECTION_SUMMARY, SECTION_TRANSCRIPT, toISODate, transcriptToMarkdown } from "./core/notes";
@@ -25,12 +26,21 @@ export class LectureSession {
 	audioPath?: string;
 	readonly segments: TranscriptSegment[] = [];
 
+	/** Why the last recording stopped on its own, if it did. */
+	autoStopReason?: string;
+
 	private recorder = new MicRecorder();
 	private chunker?: Chunker;
 	private pipeline?: TranscriptionPipeline;
 	private flushTimer?: number;
 	private levelTimer?: number;
+	private watchdogTimer?: number;
 	private levelDirty = false;
+	/** Transcript already in the note from an earlier recording of the same lecture. */
+	private priorTranscript = "";
+	private lastTick = 0;
+	private lastSpeechAt = 0;
+	private stopping = false;
 	private summaryAbort?: AbortController;
 	private listeners = new Set<() => void>();
 	private segmentListeners = new Set<(segments: TranscriptSegment[]) => void>();
@@ -83,6 +93,8 @@ export class LectureSession {
 		this.error = undefined;
 		this.summary = "";
 		this.audioPath = undefined;
+		this.autoStopReason = undefined;
+		this.priorTranscript = "";
 		this.segments.length = 0;
 		this.chunker = undefined;
 		this.pipeline = undefined;
@@ -102,6 +114,8 @@ export class LectureSession {
 		try {
 			await this.plugin.startServer();
 			this.target = await this.plugin.ensureLectureNote(name, date);
+			// A second recording of the same lecture appends instead of wiping the first.
+			this.priorTranscript = cleanTranscript((await this.plugin.vault.readSection(this.target, SECTION_TRANSCRIPT)) ?? "", true);
 			const settings = this.plugin.settings;
 			this.pipeline = new TranscriptionPipeline(
 				async (wav, { prompt }) => {
@@ -142,7 +156,9 @@ export class LectureSession {
 				onLevel: (level) => {
 					this.level = level;
 					this.levelDirty = true;
+					if (level >= 0.01 && this.status === "recording") this.lastSpeechAt = Date.now();
 				},
+				onLost: (reason) => void this.autoStop(reason),
 			});
 			this.status = "recording";
 			this.emit();
@@ -153,6 +169,9 @@ export class LectureSession {
 				}
 			}, 100);
 			this.flushTimer = window.setInterval(() => void this.flushPartial(), 60_000);
+			this.lastTick = Date.now();
+			this.lastSpeechAt = Date.now();
+			this.watchdogTimer = window.setInterval(() => this.watchdog(), 5_000);
 		} catch (err) {
 			await this.recorder.stop().catch(() => null);
 			this.clearTimers();
@@ -177,9 +196,45 @@ export class LectureSession {
 		this.emit();
 	}
 
+	/**
+	 * Safety net for forgotten recordings: the laptop went to sleep (wall clock jumped), the
+	 * recording hit the maximum length, or nobody has spoken for a long time.
+	 */
+	private watchdog(): void {
+		const now = Date.now();
+		const gap = now - this.lastTick;
+		this.lastTick = now;
+		if (this.status !== "recording" && this.status !== "paused") return;
+		if (gap > 30_000) {
+			void this.autoStop(`the computer was asleep for ${Math.round(gap / 60_000)} min`);
+			return;
+		}
+		const s = this.plugin.settings;
+		if (s.maxRecordingMinutes > 0 && this.recordedSec >= s.maxRecordingMinutes * 60) {
+			void this.autoStop(`the ${s.maxRecordingMinutes}-minute maximum was reached`);
+			return;
+		}
+		if (s.autoStopSilenceMinutes > 0 && this.status === "recording" && now - this.lastSpeechAt > s.autoStopSilenceMinutes * 60_000) {
+			void this.autoStop(`no speech for ${s.autoStopSilenceMinutes} min`);
+		}
+	}
+
+	private async autoStop(reason: string): Promise<void> {
+		if (this.stopping || (this.status !== "recording" && this.status !== "paused")) return;
+		this.autoStopReason = reason;
+		new Notice(`Lecture Companion stopped recording: ${reason}. Writing the note…`, 10_000);
+		try {
+			const target = await this.stop();
+			if (target) new Notice(`Lecture note written: ${target.path}`);
+		} catch (err) {
+			new Notice(`Auto-stop failed: ${(err as Error).message}`, 10_000);
+		}
+	}
+
 	/** Stops recording, waits for the transcript to catch up, writes the note, optionally summarizes. */
 	async stop(): Promise<NoteTarget | undefined> {
 		if (this.status !== "recording" && this.status !== "paused") return this.target;
+		this.stopping = true;
 		this.status = "finishing";
 		this.clearTimers();
 		this.emit();
@@ -207,6 +262,8 @@ export class LectureSession {
 			this.error = (err as Error).message;
 			this.emit();
 			throw err;
+		} finally {
+			this.stopping = false;
 		}
 		return this.target;
 	}
@@ -221,12 +278,12 @@ export class LectureSession {
 		this.emit();
 		this.summaryAbort = new AbortController();
 		try {
-			const transcript = this.segments.length > 0
-				? transcriptToMarkdown(this.segments)
-				: ((await this.plugin.vault.readSection(target, SECTION_TRANSCRIPT)) ?? "");
-			const slideText = await this.plugin.vault.readSection(target, SECTION_SLIDES);
-			if (!transcript.trim() || /^_No transcript yet\._$/.test(transcript.trim())) {
-				throw new Error("There is no transcript to summarize yet");
+			// Prefer the note (it holds earlier recordings too); fall back to the live segments.
+			const fromNote = cleanTranscript((await this.plugin.vault.readSection(target, SECTION_TRANSCRIPT)) ?? "", false);
+			const transcript = fromNote || (this.segments.length > 0 ? transcriptToMarkdown(this.segments) : "");
+			const slideText = cleanTranscript((await this.plugin.vault.readSection(target, SECTION_SLIDES)) ?? "", false);
+			if (!transcript.trim()) {
+				throw new Error("The transcript is empty, so there is nothing to summarize. Record the lecture (or paste a transcript into the Transcript section) first.");
 			}
 			const settings = this.plugin.settings;
 			const text = await summarizeLecture(
@@ -241,7 +298,7 @@ export class LectureSession {
 					course: this.course || target.path,
 					date: this.date || toISODate(),
 					transcript,
-					slideText: slideText && !/^_No slides yet\._$/.test(slideText.trim()) ? slideText : undefined,
+					slideText: slideText || undefined,
 					extraInstructions: settings.summaryInstructions,
 				},
 				(delta) => {
@@ -289,19 +346,41 @@ export class LectureSession {
 	private async writeTranscript(): Promise<void> {
 		if (!this.target) return;
 		const lines: string[] = [];
+		if (this.priorTranscript) lines.push(this.priorTranscript, "");
 		if (this.audioPath) lines.push(`![[${this.audioPath.split("/").pop() ?? this.audioPath}]]`, "");
-		lines.push(this.segments.length > 0 ? transcriptToMarkdown(this.segments) : "_Nothing was transcribed._");
+		if (this.segments.length > 0) lines.push(transcriptToMarkdown(this.segments));
+		else if (!this.priorTranscript) lines.push("_Nothing was transcribed._");
 		await this.plugin.vault.writeSection(this.target, SECTION_TRANSCRIPT, lines.join("\n"), "replace");
 	}
 
 	private clearTimers(): void {
 		if (this.flushTimer !== undefined) window.clearInterval(this.flushTimer);
 		if (this.levelTimer !== undefined) window.clearInterval(this.levelTimer);
+		if (this.watchdogTimer !== undefined) window.clearInterval(this.watchdogTimer);
 		this.flushTimer = undefined;
 		this.levelTimer = undefined;
+		this.watchdogTimer = undefined;
 	}
 
 	private emit(): void {
 		for (const l of this.listeners) l();
 	}
+}
+
+/**
+ * Strips placeholders (`_No transcript yet._`) and, for model input, audio embeds, so an empty
+ * section reads as empty and a summary never sees "![[recording.webm]]" as the lecture.
+ */
+export function cleanTranscript(section: string, keepEmbeds: boolean): string {
+	return section
+		.split("\n")
+		.filter((line) => {
+			const t = line.trim();
+			if (/^_[^_]*_$/.test(t)) return false;
+			if (!keepEmbeds && /^!\[\[[^\]]*\]\]$/.test(t)) return false;
+			return true;
+		})
+		.join("\n")
+		.replace(/\n{3,}/g, "\n\n")
+		.trim();
 }

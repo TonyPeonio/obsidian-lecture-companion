@@ -12,14 +12,22 @@ export interface LectureCompanionSettings {
 	remoteWhisperUrl: string;
 	idleUnloadMinutes: number;
 	useVad: boolean;
+	/** Extra command-line arguments for whisper-server, e.g. "-fa" on a GPU build. */
+	extraServerArgs: string;
 	// Recording
 	keepAudio: boolean;
 	chunkSeconds: number;
 	silenceCutMs: number;
 	inputDeviceId: string;
+	/** Stop automatically after this long. 0 = never. */
+	maxRecordingMinutes: number;
+	/** Stop automatically after this long without any speech. 0 = never. */
+	autoStopSilenceMinutes: number;
 	// Canvas
 	canvasUrl: string;
 	canvasToken: string;
+	/** "Today's" slides include files changed in the last N days (1 = today only). */
+	lookbackDays: number;
 	courseFolder: string;
 	/** One per line: `course id or name = path/to/note.md` */
 	courseNotes: string;
@@ -47,12 +55,16 @@ export const DEFAULT_SETTINGS: LectureCompanionSettings = {
 	remoteWhisperUrl: "",
 	idleUnloadMinutes: 10,
 	useVad: false,
+	extraServerArgs: "",
 	keepAudio: true,
 	chunkSeconds: 20,
 	silenceCutMs: 700,
 	inputDeviceId: "",
+	maxRecordingMinutes: 180,
+	autoStopSilenceMinutes: 15,
 	canvasUrl: "",
 	canvasToken: "",
+	lookbackDays: 1,
 	courseFolder: "Courses",
 	courseNotes: "",
 	dateHeading: "## {{date}}",

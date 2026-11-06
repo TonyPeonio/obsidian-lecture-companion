@@ -8,6 +8,8 @@ export const TARGET_RATE = 16000;
 export interface RecorderCallbacks {
 	onFrame(pcm: Float32Array): void;
 	onLevel(level: number): void;
+	/** The microphone went away (unplugged, device sleep, OS revoked access). */
+	onLost?(reason: string): void;
 }
 
 // Runs inside the AudioWorklet global scope; batches ~100 ms of samples per message.
@@ -72,6 +74,9 @@ export class MicRecorder {
 			},
 		};
 		this.stream = await navigator.mediaDevices.getUserMedia(constraints);
+		for (const track of this.stream.getAudioTracks()) {
+			track.addEventListener("ended", () => cb.onLost?.("the microphone stopped (device removed or access revoked)"));
+		}
 		let ctx: AudioContext;
 		try {
 			ctx = new AudioContext({ sampleRate: TARGET_RATE });

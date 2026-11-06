@@ -37,6 +37,8 @@ export interface ServerConfig {
 	threads: number;
 	language: string;
 	vadModelPath?: string;
+	/** Appended verbatim, e.g. ["-fa"] for flash attention on GPU builds. */
+	extraArgs?: string[];
 	/** When set, no process is spawned; requests go to this URL instead. */
 	remoteUrl?: string;
 	/** Stop the local server after this long without a request. 0 = never. */
@@ -70,7 +72,17 @@ export function buildServerArgs(cfg: ServerConfig, port: number): string[] {
 		"-l", cfg.language.trim() || "en",
 	];
 	if (cfg.vadModelPath) args.push("--vad", "-vm", cfg.vadModelPath);
+	if (cfg.extraArgs?.length) args.push(...cfg.extraArgs);
 	return args;
+}
+
+/** Splits a user-typed argument string on whitespace, honouring double quotes. */
+export function parseExtraArgs(text: string): string[] {
+	const out: string[] = [];
+	const re = /"([^"]*)"|(\S+)/g;
+	let m: RegExpExecArray | null;
+	while ((m = re.exec(text)) !== null) out.push(m[1] ?? m[2] ?? "");
+	return out.filter((a) => a.length > 0);
 }
 
 export class WhisperServerManager {
@@ -101,7 +113,7 @@ export class WhisperServerManager {
 			this.setState({ status: "remote", baseUrl: url });
 			return url;
 		}
-		const signature = JSON.stringify([cfg.binary, cfg.modelPath, cfg.threads, cfg.language, cfg.vadModelPath ?? ""]);
+		const signature = JSON.stringify([cfg.binary, cfg.modelPath, cfg.threads, cfg.language, cfg.vadModelPath ?? "", cfg.extraArgs ?? []]);
 		if (this.proc && this.baseUrl && this.launchedSignature === signature) {
 			this.touch();
 			return this.baseUrl;

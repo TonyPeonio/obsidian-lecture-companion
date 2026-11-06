@@ -92,14 +92,31 @@ export class CanvasClient {
 		const types = opts.contentTypes ?? SLIDE_CONTENT_TYPES;
 		if (types.length) params["content_types[]"] = types;
 		if (opts.search) params.search_term = opts.search;
-		const rows = await this.getAll(`/api/v1/courses/${courseId}/files`, params);
 		const byId = new Map<number, CanvasFile>();
-		for (const row of rows) {
-			const f = toFile(row, "files");
-			if (f) byId.set(f.id, f);
+		let filesError: CanvasError | undefined;
+		try {
+			for (const row of await this.getAll(`/api/v1/courses/${courseId}/files`, params)) {
+				const f = toFile(row, "files");
+				if (f) byId.set(f.id, f);
+			}
+		} catch (err) {
+			// Many courses hide the Files tab from students (401/403). Files attached to Modules
+			// are still reachable individually, so fall through to those.
+			if (err instanceof CanvasError && (err.status === 401 || err.status === 403 || err.status === 404) && (opts.includeModules ?? true)) {
+				filesError = err;
+			} else {
+				throw err;
+			}
 		}
 		if (opts.includeModules ?? true) {
-			for (const item of await this.listModuleFileItems(courseId)) {
+			let items: { fileId: number; moduleName: string; title: string }[];
+			try {
+				items = await this.listModuleFileItems(courseId);
+			} catch (err) {
+				if (filesError) throw new CanvasError(`Neither the Files area nor Modules are accessible for this course (${filesError.message}; ${(err as Error).message})`, filesError.status);
+				throw err;
+			}
+			for (const item of items) {
 				const existing = byId.get(item.fileId);
 				if (existing) {
 					existing.moduleName = existing.moduleName ?? item.moduleName;

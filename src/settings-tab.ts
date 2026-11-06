@@ -4,7 +4,7 @@ import { installHint, locateWhisperServer } from "./core/whisper/locate";
 import type LectureCompanionPlugin from "./main";
 import { MicRecorder } from "./recorder";
 import { DEFAULT_SETTINGS } from "./settings";
-import { cpuCount, nodeDownloadDeps, nodeLocateDeps } from "./node/deps";
+import { cpuCount, defaultThreads, nodeDownloadDeps, nodeLocateDeps } from "./node/deps";
 
 export class LectureCompanionSettingTab extends PluginSettingTab {
 	private downloading?: AbortController;
@@ -92,12 +92,23 @@ export class LectureCompanionSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Threads")
-			.setDesc(`CPU threads for whisper-server. 0 = all logical CPUs (${cpuCount()} on this machine).`)
+			.setDesc(`CPU threads for whisper-server. 0 = one per physical core (${defaultThreads()} here; ${cpuCount()} logical CPUs). More than the physical core count is usually slower, not faster.`)
 			.addText((t) =>
 				t.setValue(String(s.threads)).onChange(async (v) => {
 					const n = parseInt(v, 10);
 					s.threads = Number.isFinite(n) && n >= 0 ? n : 0;
 					await save();
+				}),
+			);
+
+		new Setting(containerEl)
+			.setName("Extra whisper-server arguments")
+			.setDesc('Advanced. Appended to the command line, e.g. "-fa" (flash attention) on a CUDA build, or "-p 2".')
+			.addText((t) =>
+				t.setPlaceholder("-fa").setValue(s.extraServerArgs).onChange(async (v) => {
+					s.extraServerArgs = v.trim();
+					await save();
+					this.plugin.server.stop();
 				}),
 			);
 
@@ -198,6 +209,28 @@ export class LectureCompanionSettingTab extends PluginSettingTab {
 			.addToggle((t) =>
 				t.setValue(s.keepAudio).onChange(async (v) => {
 					s.keepAudio = v;
+					await save();
+				}),
+			);
+
+		new Setting(containerEl)
+			.setName("Stop automatically after (minutes)")
+			.setDesc("Hard limit on one recording, for the day you forget to press stop. Sleeping the laptop also stops and finishes the recording. 0 = no limit.")
+			.addText((t) =>
+				t.setValue(String(s.maxRecordingMinutes)).onChange(async (v) => {
+					const n = parseInt(v, 10);
+					s.maxRecordingMinutes = Number.isFinite(n) && n >= 0 ? n : DEFAULT_SETTINGS.maxRecordingMinutes;
+					await save();
+				}),
+			);
+
+		new Setting(containerEl)
+			.setName("Stop after silence (minutes)")
+			.setDesc("Stop when nobody has spoken for this long. Set it longer than the quiet stretches in your classes (group work, exercises). 0 = never.")
+			.addText((t) =>
+				t.setValue(String(s.autoStopSilenceMinutes)).onChange(async (v) => {
+					const n = parseInt(v, 10);
+					s.autoStopSilenceMinutes = Number.isFinite(n) && n >= 0 ? n : DEFAULT_SETTINGS.autoStopSilenceMinutes;
 					await save();
 				}),
 			);
@@ -312,6 +345,17 @@ export class LectureCompanionSettingTab extends PluginSettingTab {
 			.addTextArea((t) =>
 				t.setPlaceholder("12345 = Courses/CS101.md").setValue(s.courseNotes).onChange(async (v) => {
 					s.courseNotes = v;
+					await save();
+				}),
+			);
+
+		new Setting(containerEl)
+			.setName("Look back (days)")
+			.setDesc("\"Today's\" slides include files changed in the last N days, so decks posted the evening before are picked up. 1 = the chosen day only.")
+			.addText((t) =>
+				t.setValue(String(s.lookbackDays)).onChange(async (v) => {
+					const n = parseInt(v, 10);
+					s.lookbackDays = Number.isFinite(n) && n >= 1 ? n : DEFAULT_SETTINGS.lookbackDays;
 					await save();
 				}),
 			);
