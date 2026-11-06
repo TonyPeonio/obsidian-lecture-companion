@@ -221,9 +221,13 @@ function normalizeHeading(h: string): string {
 	return h.replace(/^#+\s*/, "").trim().toLowerCase();
 }
 
-/** Finds a heading by text (case-insensitive, with or without leading `#`s), skipping code fences. */
+/**
+ * Finds a heading by text (case-insensitive), skipping code fences. Written with leading `#`s
+ * ("## Lectures") the level must match too; without them any level matches.
+ */
 export function findSection(lines: string[], heading: string): SectionRange | null {
 	const want = normalizeHeading(heading);
+	const wantLevel = /^(#{1,6})\s/.exec(heading.trim())?.[1]?.length;
 	let inFence = false;
 	let found: { line: number; level: number } | null = null;
 	for (let i = 0; i < lines.length; i++) {
@@ -236,7 +240,7 @@ export function findSection(lines: string[], heading: string): SectionRange | nu
 		const h = headingText(line);
 		if (!h) continue;
 		if (!found) {
-			if (h.text.toLowerCase() === want) found = { line: i, level: h.level };
+			if (h.text.toLowerCase() === want && (wantLevel === undefined || h.level === wantLevel)) found = { line: i, level: h.level };
 			continue;
 		}
 		if (h.level <= found.level) {
@@ -307,7 +311,8 @@ export function upsertNestedSection(
 	const updated = upsertSection(inner, childLine, body, mode);
 	const before = lines.slice(0, parent.bodyStart);
 	const after = lines.slice(parent.bodyEnd);
-	return [...before, ...updated.replace(/\s+$/, "").split("\n"), "", ...after].join("\n").replace(/\n{3,}/g, "\n\n");
+	// Blank line after the parent heading, then the (updated) body, then a blank line before what follows.
+	return [...before, "", ...updated.replace(/^\s+|\s+$/g, "").split("\n"), "", ...after].join("\n").replace(/\n{3,}/g, "\n\n");
 }
 
 export function nestedSectionBody(markdown: string, parentHeading: string, childHeading: string): string | null {
@@ -360,5 +365,6 @@ export function migrateCourseIndex(markdown: string): string {
 	}
 	let out = keep.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 	for (const { date, link } of links.sort((a, b) => a.date.localeCompare(b.date))) out = addLectureLink(out, date, link);
-	return out ? `${out}\n` : out;
+	out = out.replace(/\s+$/, "");
+	return out ? `${out}\n` : "";
 }
