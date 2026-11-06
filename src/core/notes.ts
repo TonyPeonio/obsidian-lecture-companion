@@ -25,7 +25,11 @@ export interface LectureNoteInput {
 	audioPath?: string;
 	/** Notes the student wrote (imported lectures). */
 	myNotes?: string;
+	/** A meeting (work, club) gets the `meeting` tag and no Slides section. Default: lecture. */
+	kind?: NoteKind;
 }
+
+export type NoteKind = "lecture" | "meeting";
 
 export const SECTION_SLIDES = "Slides";
 export const SECTION_SUMMARY = "Summary";
@@ -72,7 +76,7 @@ export function safeFileName(name: string): string {
 /** True when a note already has the lecture layout (frontmatter tag or the four sections). */
 export function isLectureNote(markdown: string): boolean {
 	const fm = /^---\n([\s\S]*?)\n---/.exec(markdown)?.[1] ?? "";
-	if (/^\s*-\s*lecture\s*$/m.test(fm)) return true;
+	if (/^\s*-\s*(?:lecture|meeting)\s*$/m.test(fm)) return true;
 	const lines = markdown.split("\n");
 	return !!(findSection(lines, SECTION_TRANSCRIPT) && findSection(lines, SECTION_SUMMARY) && findSection(lines, SECTION_MY_NOTES));
 }
@@ -171,21 +175,20 @@ export function slidesToMarkdown(slides: SlideAttachment[]): string {
 
 /** No H1: Obsidian shows the file name as the inline title, so a heading would repeat it. */
 export function renderLectureNote(input: LectureNoteInput): string {
+	const meeting = input.kind === "meeting";
 	const fm = [
 		"---",
 		`course: "${input.course.replace(/"/g, '\\"')}"`,
 		`date: ${input.date}`,
 		"tags:",
-		"  - lecture",
+		meeting ? "  - meeting" : "  - lecture",
 	];
 	if (input.audioPath) fm.push(`audio: "[[${input.audioPath.split("/").pop() ?? input.audioPath}]]"`);
 	if (input.title?.trim()) fm.push(`title: "${input.title.trim().replace(/"/g, '\\"')}"`);
 	fm.push("---");
+	const slides = meeting ? [] : [`## ${SECTION_SLIDES}`, "", input.slides?.length ? slidesToMarkdown(input.slides) : "_No slides yet._", ""];
 	const sections = [
-		`## ${SECTION_SLIDES}`,
-		"",
-		input.slides?.length ? slidesToMarkdown(input.slides) : "_No slides yet._",
-		"",
+		...slides,
 		`## ${SECTION_SUMMARY}`,
 		"",
 		input.summary?.trim() || "_No summary yet._",
@@ -326,9 +329,9 @@ export function nestedSectionBody(markdown: string, parentHeading: string, child
  * Course-note layout: one `## Lectures` section with a `### YYYY-MM-DD` subheading per day.
  * Adds the link unless it is already there.
  */
-export function addLectureLink(markdown: string, date: string, link: string): string {
+export function addLectureLink(markdown: string, date: string, link: string, listHeading = "## Lectures"): string {
 	if (markdown.includes(link)) return markdown;
-	return upsertNestedSection(markdown, "## Lectures", date, `- ${link}`, "append");
+	return upsertNestedSection(markdown, listHeading, date, `- ${link}`, "append");
 }
 
 /**

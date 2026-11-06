@@ -2,7 +2,7 @@ import { Modal, Notice, Platform, Plugin, requestUrl, TFile, type App, type Work
 import { describePull, pullSlides } from "./canvas-pull";
 import { CanvasClient, resolveCourse, type CanvasCourse } from "./core/canvas";
 import type { HttpRequest } from "./core/http";
-import { addLectureLink, addTodos, courseNotePath, ensureTodoSection, extractTodos, replaceAttachmentRefs, SECTION_MY_NOTES, dateHeading, detectDate, lectureNotePath, migrateCourseIndex, renderLectureNote, SECTION_SLIDES, SECTION_TRANSCRIPT, stripFrontmatter, toISODate } from "./core/notes";
+import { addLectureLink, addTodos, courseNotePath, ensureTodoSection, extractTodos, replaceAttachmentRefs, SECTION_MY_NOTES, dateHeading, detectDate, lectureNotePath, migrateCourseIndex, renderLectureNote, safeFileName, SECTION_SLIDES, SECTION_TRANSCRIPT, stripFrontmatter, toISODate, type NoteKind } from "./core/notes";
 import { ImportModal, importNotesAsLecture, listImportableNotes } from "./import";
 import { groupEntriesByDate, splitEntries } from "./core/split";
 import { SplitModal, type SplitChoice } from "./split-modal";
@@ -14,7 +14,7 @@ import { parseExtraArgs, WhisperServerManager, type ServerConfig, type ServerSta
 import { defaultThreads, nodeLocateDeps, nodeServerDeps } from "./node/deps";
 import { convertPptxToPdf, findPptxConverter, type PptxConverter } from "./node/convert";
 import { cleanTranscript, LectureSession } from "./session";
-import { addCourseAlias, courseNoteOverride, DEFAULT_SETTINGS, manualCourseList, vaultCourseName, type LectureCompanionSettings } from "./settings";
+import { addCourseAlias, addMeeting, courseNoteOverride, DEFAULT_SETTINGS, manualCourseList, meetingList, vaultCourseName, type LectureCompanionSettings } from "./settings";
 import { LectureCompanionSettingTab } from "./settings-tab";
 import { VaultIO, type NoteTarget } from "./vault";
 import { LectureView, VIEW_TYPE } from "./view";
@@ -172,10 +172,11 @@ export default class LectureCompanionPlugin extends Plugin {
 			id: "rebuild-course-index",
 			name: "Rebuild course note links (list every lecture note under its date)",
 			callback: async () => {
-				const courses = this.vault.coursesInFolder(this.settings.courseFolder);
+				const courses = this.vault.coursesInFolder(this.settings.courseFolder).filter((c) => !this.isMeeting(c));
+				const meetings = this.meetingFolderSeparate() ? this.vault.coursesInFolder(this.settings.meetingFolder) : [];
 				let total = 0;
-				for (const c of courses) total += await this.rebuildCourseIndex(c);
-				new Notice(`Course notes updated for ${courses.length} course${courses.length === 1 ? "" : "s"} (${total} lecture notes linked).`);
+				for (const c of [...courses, ...meetings]) total += await this.rebuildCourseIndex(c);
+				new Notice(`Course notes updated for ${courses.length} course${courses.length === 1 ? "" : "s"}${meetings.length ? ` and ${meetings.length} meeting series` : ""} (${total} notes linked).`);
 			},
 		});
 		this.addCommand({
@@ -311,7 +312,54 @@ export default class LectureCompanionPlugin extends Plugin {
 		for (const c of this.courses) names.add(c.name);
 		for (const c of manualCourseList(this.settings)) names.add(c);
 		for (const c of this.vault.coursesInFolder(this.settings.courseFolder)) names.add(c);
+		for (const m of meetingList(this.settings)) names.add(m);
+		if (this.meetingFolderSeparate()) for (const m of this.vault.coursesInFolder(this.settings.meetingFolder)) names.add(m);
 		return [...names].sort((a, b) => a.localeCompare(b));
+	}
+
+	// ----------------------------------------------------------------- meetings
+
+	/** False when the meeting folder is set to the course folder (then only the list marks meetings). */
+	private meetingFolderSeparate(): boolean {
+		return this.settings.meetingFolder.trim().toLowerCase() !== this.settings.courseFolder.trim().toLowerCase();
+	}
+
+	/** A meeting series (work, club, 1:1): listed in settings, or already filed under the meeting folder. Never looked up in Canvas. */
+	isMeeting(name: string): boolean {
+		const wanted = name.trim().toLowerCase();
+		if (!wanted) return false;
+		if (meetingList(this.settings).some((m) => m.toLowerCase() === wanted)) return true;
+		if (!this.meetingFolderSeparate()) return false;
+		const file = safeFileName(name).toLowerCase();
+		return this.vault.coursesInFolder(this.settings.meetingFolder).some((m) => m.toLowerCase() === wanted || m.toLowerCase() === file);
+	}
+
+	noteKind(name: string): NoteKind {
+		return this.isMeeting(name) ? "meeting" : "lecture";
+	}
+
+	/** Root folder for a course or meeting series. */
+	folderFor(name: string): string {
+		return this.isMeeting(name) ? this.settings.meetingFolder : this.settings.courseFolder;
+	}
+
+	/** Adds a name to the meeting list (from the panel's or import dialog's "Meeting" box). */
+	async markMeeting(name: string): Promise<void> {
+		if (this.isMeeting(name)) return;
+		if (addMeeting(this.settings, name)) await this.saveSettings();
+	}
+
+	/** The course or meeting series a note belongs to: frontmatter `course:`, else its folder (or its own name for a series note at the top). */
+	async seriesOfNote(path: string): Promise<string> {
+		const md = await this.vault.read(path).catch(() => "");
+		const fm = /^---\n([\s\S]*?)\n---/.exec(md)?.[1] ?? "";
+		const fromFm = /^course:\s*"?(.*?)"?\s*$/m.exec(fm)?.[1]?.trim();
+		if (fromFm) return fromFm;
+		const parts = path.split("/");
+		const parent = parts.length >= 2 ? (parts[parts.length - 2] ?? "") : "";
+		const roots = [this.settings.courseFolder, this.settings.meetingFolder].map((f) => f.split("/").pop()?.toLowerCase());
+		if (!parent || roots.includes(parent.toLowerCase())) return (parts[parts.length - 1] ?? "").replace(/\.md$/, "");
+		return parent;
 	}
 
 	// -------------------------------------------------------------------- notes
@@ -321,9 +369,9 @@ export default class LectureCompanionPlugin extends Plugin {
 		if (s.noteMode === "per-course-section") {
 			const canvasCourse = this.courses.find((c) => c.name === course);
 			const override = courseNoteOverride(s, canvasCourse ?? { name: course });
-			return { path: override ?? courseNotePath(s.courseFolder, course), parentHeading: dateHeading(s.dateHeading, date) };
+			return { path: override ?? courseNotePath(this.folderFor(course), course), parentHeading: dateHeading(s.dateHeading, date) };
 		}
-		return { path: lectureNotePath(s.courseFolder, course, date) };
+		return { path: lectureNotePath(this.folderFor(course), course, date) };
 	}
 
 	/** Creates the lecture note skeleton (and the course note link) when missing. `course` is the vault name (alias). */
@@ -334,23 +382,24 @@ export default class LectureCompanionPlugin extends Plugin {
 			await this.vault.createIfMissing(target.path, "");
 			return target;
 		}
-		await this.vault.createIfMissing(target.path, renderLectureNote({ course, date }));
+		await this.vault.createIfMissing(target.path, renderLectureNote({ course, date, kind: this.noteKind(course) }));
 		await this.ensureCourseLink(course, date, target.path);
 		return target;
 	}
 
-	/** Makes sure the course note (`Courses/<course>.md`) lists this lecture under `## Lectures` → `### <date>`. Idempotent. */
+	/** Makes sure the course note (`Courses/<course>.md`) lists this lecture under `## Lectures` → `### <date>` (`## Meetings` for a meeting series). Idempotent. */
 	async ensureCourseLink(course: string, date: string, lecturePath: string): Promise<void> {
-		const coursePath = courseNotePath(this.settings.courseFolder, course);
-		const link = `[[${lecturePath.replace(/\.md$/, "")}|${date} lecture]]`;
+		const meeting = this.isMeeting(course);
+		const coursePath = courseNotePath(this.folderFor(course), course);
+		const link = `[[${lecturePath.replace(/\.md$/, "")}|${date} ${meeting ? "meeting" : "lecture"}]]`;
 		const f = this.vault.file(coursePath) ?? (await this.vault.write(coursePath, ""));
-		await this.app.vault.process(f, (md) => ensureTodoSection(addLectureLink(md, date, link)));
+		await this.app.vault.process(f, (md) => ensureTodoSection(addLectureLink(md, date, link, meeting ? "## Meetings" : "## Lectures")));
 	}
 
 	/** Moves task lines into the course note's `## TODO` section. Returns how many were added. */
 	async addCourseTodos(course: string, todos: string[]): Promise<number> {
 		if (todos.length === 0) return 0;
-		const coursePath = courseNotePath(this.settings.courseFolder, course);
+		const coursePath = courseNotePath(this.folderFor(course), course);
 		const f = this.vault.file(coursePath) ?? (await this.vault.write(coursePath, ""));
 		let added = 0;
 		await this.app.vault.process(f, (md) => {
@@ -363,10 +412,7 @@ export default class LectureCompanionPlugin extends Plugin {
 
 	/** "Move tasks from this note to the course TODO": pulls task lines out of the open note's My notes section. */
 	async moveTodosFromNote(path: string): Promise<void> {
-		const md = await this.vault.read(path);
-		const fm = /^---\n([\s\S]*?)\n---/.exec(md)?.[1] ?? "";
-		const parts = path.split("/");
-		const course = /^course:\s*"?(.*?)"?\s*$/m.exec(fm)?.[1]?.trim() || (parts.length >= 2 ? (parts[parts.length - 2] ?? "") : "");
+		const course = await this.seriesOfNote(path);
 		if (!course) {
 			new Notice("Cannot tell which course this note belongs to (no course in frontmatter or folder).");
 			return;
@@ -380,15 +426,15 @@ export default class LectureCompanionPlugin extends Plugin {
 		}
 		await this.vault.writeSection(target, SECTION_MY_NOTES, remaining, "replace");
 		const added = await this.addCourseTodos(course, todos);
-		new Notice(`${todos.length} task${todos.length === 1 ? "" : "s"} moved to ${courseNotePath(this.settings.courseFolder, course)} (${added} new).`);
+		new Notice(`${todos.length} task${todos.length === 1 ? "" : "s"} moved to ${courseNotePath(this.folderFor(course), course)} (${added} new).`);
 	}
 
 	/** Rebuilds the course note's lecture list from the notes on disk (and converts the old per-date layout). */
 	async rebuildCourseIndex(course: string): Promise<number> {
-		const coursePath = courseNotePath(this.settings.courseFolder, course);
+		const coursePath = courseNotePath(this.folderFor(course), course);
 		const existing = this.vault.file(coursePath);
-		if (existing) await this.app.vault.process(existing, (md) => migrateCourseIndex(md));
-		const paths = this.vault.lectureNotePaths(this.settings.courseFolder, course).filter((p) => /\/\d{4}-\d{2}-\d{2}\.md$/.test(p)).sort();
+		if (existing && !this.isMeeting(course)) await this.app.vault.process(existing, (md) => migrateCourseIndex(md));
+		const paths = this.vault.lectureNotePaths(this.folderFor(course), course).filter((p) => /\/\d{4}-\d{2}-\d{2}\.md$/.test(p)).sort();
 		for (const p of paths) {
 			const date = /(\d{4}-\d{2}-\d{2})\.md$/.exec(p)?.[1];
 			if (date) await this.ensureCourseLink(course, date, p);
@@ -479,7 +525,7 @@ export default class LectureCompanionPlugin extends Plugin {
 
 	/** Remembers "typed name → Canvas course" so pulls use the same note name the user chose. */
 	async learnCourseAlias(typed: string): Promise<void> {
-		if (!this.canvas.configured) return;
+		if (!this.canvas.configured || this.isMeeting(typed)) return;
 		if (this.courses.length === 0) await this.refreshCourses().catch(() => undefined);
 		const course = this.canvasCourseFor(typed);
 		if (course && addCourseAlias(this.settings, course, typed)) await this.saveSettings();
@@ -493,7 +539,7 @@ export default class LectureCompanionPlugin extends Plugin {
 
 	/** Matches a deck against `text` (transcript or the student's notes) when the Slides section is still empty. */
 	async matchSlides(course: string, date: string, target: NoteTarget, text: string, mode: "ask" | "auto"): Promise<void> {
-		if (!this.canvas.configured) return;
+		if (!this.canvas.configured || this.isMeeting(course)) return;
 		const existing = cleanTranscript((await this.vault.readSection(target, SECTION_SLIDES)) ?? "", false);
 		if (existing) return; // slides already chosen for this lecture
 		if (this.courses.length === 0) await this.refreshCourses();
@@ -571,14 +617,14 @@ export default class LectureCompanionPlugin extends Plugin {
 		for (const g of groups) {
 			notice.setMessage(`Importing ${g.date} (${done + 1}/${groups.length})…`);
 			try {
-				await importNotesAsLecture(this, { course: choice.course, date: g.date, text: g.text, matchSlides: choice.matchSlides, summarize: choice.summarize });
+				await importNotesAsLecture(this, { course: choice.course, date: g.date, text: g.text, matchSlides: choice.matchSlides, summarize: choice.summarize, meeting: choice.meeting });
 				done++;
 			} catch (err) {
 				failures.push(`${g.date}: ${(err as Error).message}`);
 			}
 		}
 		notice.hide();
-		new Notice(`Imported ${done} of ${groups.length} lectures into ${this.settings.courseFolder}/${choice.course}.${failures.length ? ` Failed: ${failures.join("; ")}` : ""}`, 12_000);
+		new Notice(`Imported ${done} of ${groups.length} ${this.isMeeting(choice.course) ? "meetings" : "lectures"} into ${this.folderFor(choice.course)}/${choice.course}.${failures.length ? ` Failed: ${failures.join("; ")}` : ""}`, 12_000);
 	}
 
 	/** "Import all notes in this folder": every non-lecture note in the active note's folder, one course, dates from file names. */
@@ -618,7 +664,7 @@ export default class LectureCompanionPlugin extends Plugin {
 			}
 		}
 		notice.hide();
-		new Notice(`Imported ${done} of ${notes.length} notes into ${this.settings.courseFolder}/${choice.course}.${failures.length ? ` Failed: ${failures.join("; ")}` : ""}`, 12_000);
+		new Notice(`Imported ${done} of ${notes.length} notes into ${this.folderFor(choice.course)}/${choice.course}.${failures.length ? ` Failed: ${failures.join("; ")}` : ""}`, 12_000);
 	}
 
 	/** "Choose slides for this lecture note": re-pick from the whole course and replace the Slides section. */
@@ -634,6 +680,10 @@ export default class LectureCompanionPlugin extends Plugin {
 		const course = courseFromFm || (parts.length >= 2 ? (parts[parts.length - 2] ?? "") : "");
 		const date = /^date:\s*(\d{4}-\d{2}-\d{2})/m.exec(fm)?.[1] ?? /(\d{4}-\d{2}-\d{2})\.md$/.exec(path)?.[1] ?? toISODate();
 		const target = this.targetForExistingNote(path);
+		if (this.isMeeting(course)) {
+			new Notice(`"${course}" is a meeting series, so it has no Canvas slides. Remove it from the meeting list in settings if it is a course.`, 8000);
+			return;
+		}
 		await this.learnCourseAlias(course);
 		const canvasCourse = this.canvasCourseFor(course);
 		if (!canvasCourse) {
@@ -663,6 +713,11 @@ export default class LectureCompanionPlugin extends Plugin {
 		try {
 			if (this.courses.length === 0) await this.refreshCourses();
 			let courses = this.courses;
+			if (courseQuery && this.isMeeting(courseQuery)) {
+				notice.hide();
+				new Notice(`"${courseQuery}" is a meeting series; there are no Canvas slides to pull. Clear the course box to pull for every course.`, 8000);
+				return;
+			}
 			if (courseQuery) {
 				const course = this.canvasCourseFor(courseQuery);
 				if (!course) {

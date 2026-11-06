@@ -235,7 +235,15 @@ function squash(s: string): string {
 	return s.toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
 
-/** Fuzzy course lookup: numeric id, exact name/code, then substring (ignoring punctuation) or token overlap. */
+/** Words that say nothing about which course is meant: terms, years and filler. */
+const WEAK_TOKENS = new Set(["fall", "spring", "summer", "winter", "term", "semester", "section", "sec", "the", "and", "for", "with", "class", "course", "lecture", "meeting", "intro", "lab"]);
+
+/**
+ * Fuzzy course lookup: numeric id, exact name/code, then a unique substring (ignoring punctuation),
+ * then word overlap. Overlap counts only distinctive words (not years, terms or filler), matched
+ * at word starts, and needs at least half of them and a single best course; otherwise there is
+ * no match, so a name like "Club meeting 2026" is never tied to "Fall 2026 BIOINFORMATICS".
+ */
 export function resolveCourse(courses: CanvasCourse[], query: string): CanvasCourse | null {
 	const q = query.trim().toLowerCase();
 	if (!q) return null;
@@ -243,18 +251,29 @@ export function resolveCourse(courses: CanvasCourse[], query: string): CanvasCou
 	const exact = courses.find((c) => c.name.toLowerCase() === q || c.courseCode.toLowerCase() === q);
 	if (exact) return exact;
 	const sq = squash(q);
+	// Plain substrings must start at a word ("algebra" in "Linear Algebra", not "art" in "Partial").
+	const atWord = new RegExp(`(?:^|[^a-z0-9])${q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`);
 	const sub = courses.filter(
-		(c) => c.name.toLowerCase().includes(q) || c.courseCode.toLowerCase().includes(q) || (sq.length >= 4 && (squash(c.name).includes(sq) || squash(c.courseCode).includes(sq))),
+		(c) => (q.length >= 3 && (atWord.test(c.name.toLowerCase()) || atWord.test(c.courseCode.toLowerCase()))) || (sq.length >= 4 && (squash(c.name).includes(sq) || squash(c.courseCode).includes(sq))),
 	);
 	if (sub.length === 1) return sub[0] ?? null;
-	const tokens = q.split(/[^a-z0-9]+/).filter(Boolean);
+	const tokens = [...new Set(q.split(/[^a-z0-9]+/))].filter((t) => t.length >= 3 && !/^\d+$/.test(t) && !WEAK_TOKENS.has(t));
+	if (tokens.length === 0) return null;
+	const needed = Math.ceil(tokens.length / 2);
 	let best: { course: CanvasCourse; score: number } | null = null;
+	let tied = false;
 	for (const c of courses) {
-		const hay = `${c.name} ${c.courseCode}`.toLowerCase();
-		const score = tokens.filter((t) => hay.includes(t)).length;
-		if (score > 0 && (!best || score > best.score)) best = { course: c, score };
+		const words = `${c.name} ${c.courseCode}`.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+		const score = tokens.filter((t) => words.some((w) => w.startsWith(t))).length;
+		if (score < needed) continue;
+		if (!best || score > best.score) {
+			best = { course: c, score };
+			tied = false;
+		} else if (score === best.score) {
+			tied = true;
+		}
 	}
-	return best?.course ?? sub[0] ?? null;
+	return best && !tied ? best.course : null;
 }
 
 export function nextLink(linkHeader: string | undefined): string | undefined {

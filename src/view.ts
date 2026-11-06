@@ -11,6 +11,9 @@ export class LectureView extends ItemView {
 	private courseInput!: HTMLInputElement;
 	private courseList!: HTMLDataListElement;
 	private dateInput!: HTMLInputElement;
+	private meetingBox!: HTMLInputElement;
+	/** The user ticked or unticked the Meeting box themselves, so typing no longer resets it. */
+	private meetingTouched = false;
 	private recordBtn!: HTMLButtonElement;
 	private pauseBtn!: HTMLButtonElement;
 	private stopBtn!: HTMLButtonElement;
@@ -57,10 +60,18 @@ export class LectureView extends ItemView {
 
 		// Toolbar
 		const bar = root.createDiv({ cls: "lc-toolbar" });
-		this.courseInput = bar.createEl("input", { cls: "lc-course", attr: { list: "lc-course-list", placeholder: "Course", spellcheck: "false" } });
+		this.courseInput = bar.createEl("input", { cls: "lc-course", attr: { list: "lc-course-list", placeholder: "Course or meeting", spellcheck: "false" } });
 		this.courseList = bar.createEl("datalist", { attr: { id: "lc-course-list" } });
 		this.dateInput = bar.createEl("input", { cls: "lc-date", type: "date" });
 		this.dateInput.value = toISODate();
+		const meetingLabel = bar.createEl("label", { cls: "lc-meeting", attr: { "aria-label": "A meeting, not a class: no Canvas slides, filed under the meeting folder, summary lists decisions and action items" } });
+		this.meetingBox = meetingLabel.createEl("input", { type: "checkbox" });
+		meetingLabel.appendText(" Meeting");
+		this.courseInput.addEventListener("input", () => this.syncMeeting());
+		this.meetingBox.addEventListener("change", () => {
+			this.meetingTouched = true;
+			this.syncMeeting();
+		});
 
 		const buttons = bar.createDiv({ cls: "lc-buttons" });
 		this.recordBtn = iconButton(buttons, "mic", "Start recording", () => void this.startRecording());
@@ -124,6 +135,20 @@ export class LectureView extends ItemView {
 		this.courseList.empty();
 		for (const name of this.plugin.courseNames()) this.courseList.createEl("option", { attr: { value: name } });
 		if (!this.courseInput.value && this.plugin.session.course) this.courseInput.value = this.plugin.session.course;
+		this.syncMeeting();
+	}
+
+	/** A name already known as a meeting ticks (and locks) the box; otherwise it follows the user's choice. */
+	private syncMeeting(): void {
+		const known = this.plugin.isMeeting(this.courseInput.value);
+		if (known) this.meetingBox.checked = true;
+		else if (!this.meetingTouched) this.meetingBox.checked = false;
+		this.meetingBox.disabled = known || this.plugin.session.isLive;
+	}
+
+	/** Records a ticked Meeting box in settings before the note is created. */
+	private async applyMeeting(course: string): Promise<void> {
+		if (this.meetingBox.checked) await this.plugin.markMeeting(course);
 	}
 
 	private async startRecording(): Promise<void> {
@@ -137,6 +162,7 @@ export class LectureView extends ItemView {
 		}
 		this.rebuildTranscript();
 		try {
+			await this.applyMeeting(course);
 			await session.start(course, this.dateInput.value || toISODate());
 		} catch (err) {
 			new Notice(`Could not start: ${(err as Error).message}`, 8000);
@@ -165,11 +191,12 @@ export class LectureView extends ItemView {
 		this.rebuildTranscript();
 		const notice = new Notice(`Decoding ${file.name}…`, 0);
 		try {
+			await this.applyMeeting(course);
 			const bytes = await file.arrayBuffer();
 			const pcm = await decodeAudioFile(bytes);
 			notice.hide();
 			const target = await this.plugin.session.transcribeAudio(course, this.dateInput.value || toISODate(), pcm, { name: file.name, bytes });
-			if (target) new Notice(`Lecture note written: ${target.path}`);
+			if (target) new Notice(`Note written: ${target.path}`);
 		} catch (err) {
 			notice.hide();
 			new Notice(`Could not transcribe ${file.name}: ${(err as Error).message}`, 10_000);
@@ -198,6 +225,8 @@ export class LectureView extends ItemView {
 		session.reset();
 		this.courseInput.value = "";
 		this.dateInput.value = toISODate();
+		this.meetingTouched = false;
+		this.syncMeeting();
 		this.rebuildTranscript();
 		this.render();
 		this.courseInput.focus();
@@ -273,6 +302,7 @@ export class LectureView extends ItemView {
 		this.pauseBtn.setAttribute("aria-label", session.status === "paused" ? "Resume" : "Pause");
 		this.courseInput.disabled = live;
 		this.dateInput.disabled = live;
+		this.syncMeeting();
 
 		this.serverPill.setText(serverLabel(server));
 		this.serverPill.className = `lc-pill lc-pill-${server.status}`;

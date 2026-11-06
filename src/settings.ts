@@ -59,6 +59,10 @@ export interface LectureCompanionSettings {
 	noteMode: NoteMode;
 	/** Course names typed by hand (one per line) for the picker when Canvas is not configured. */
 	manualCourses: string;
+	// Meetings
+	/** Meeting series (work, club, 1:1s), one name per line: never looked up in Canvas, filed under `meetingFolder`, summarized as meetings. */
+	meetings: string;
+	meetingFolder: string;
 }
 
 export const DEFAULT_SETTINGS: LectureCompanionSettings = {
@@ -97,6 +101,8 @@ export const DEFAULT_SETTINGS: LectureCompanionSettings = {
 	summaryInstructions: "",
 	noteMode: "per-lecture",
 	manualCourses: "",
+	meetings: "",
+	meetingFolder: "Meetings",
 };
 
 /** Parses the `key = path` overrides. Keys are matched case-insensitively against course id, name and code. */
@@ -185,4 +191,20 @@ export function manualCourseList(settings: LectureCompanionSettings): string[] {
 		.split("\n")
 		.map((s) => s.trim())
 		.filter((s) => s.length > 0);
+}
+
+/** Meeting series names from settings (trimmed, non-empty). */
+export function meetingList(settings: LectureCompanionSettings): string[] {
+	return settings.meetings
+		.split("\n")
+		.map((s) => s.trim())
+		.filter((s) => s.length > 0);
+}
+
+/** Adds a meeting series to the list unless it is already there (case-insensitive). Returns true when settings changed. */
+export function addMeeting(settings: LectureCompanionSettings, name: string): boolean {
+	const wanted = name.trim();
+	if (!wanted || meetingList(settings).some((m) => m.toLowerCase() === wanted.toLowerCase())) return false;
+	settings.meetings = settings.meetings.trim() ? `${settings.meetings.trim()}\n${wanted}` : wanted;
+	return true;
 }

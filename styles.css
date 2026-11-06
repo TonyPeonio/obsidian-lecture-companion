@@ -24,6 +24,15 @@
 	flex: 0 0 auto;
 }
 
+.lc-meeting {
+	flex: 0 0 auto;
+	display: flex;
+	align-items: center;
+	gap: var(--size-2-1);
+	font-size: var(--font-ui-small);
+	color: var(--text-muted);
+}
+
 .lc-buttons {
 	display: flex;
 	gap: var(--size-2-2);

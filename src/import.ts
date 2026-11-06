@@ -16,6 +16,8 @@ export interface ImportOptions {
 	sourcePath?: string;
 	matchSlides: "ask" | "auto" | "off";
 	summarize: boolean;
+	/** Add the name to the meeting list first (no Canvas, meeting layout and summary). */
+	meeting?: boolean;
 }
 
 export interface ImportResult {
@@ -34,7 +36,9 @@ export async function importNotesAsLecture(plugin: LectureCompanionPlugin, opts:
 	const { remaining, todos } = extractTodos(opts.text.trim());
 	const notes = remaining || (todos.length ? "_Only tasks; see the course TODO list._" : "");
 	if (!notes) throw new Error("The note is empty");
+	if (opts.meeting) await plugin.markMeeting(course);
 	await plugin.learnCourseAlias(course);
+	const kind = plugin.noteKind(course);
 
 	const perLecture = plugin.settings.noteMode === "per-lecture";
 	const target = plugin.noteTargetFor(course, opts.date);
@@ -47,11 +51,11 @@ export async function importNotesAsLecture(plugin: LectureCompanionPlugin, opts:
 			if (!isLectureNote(existing)) {
 				const split = extractTodos(stripFrontmatter(existing));
 				todos.push(...split.todos);
-				await plugin.vault.write(target.path, renderLectureNote({ course, date: opts.date, myNotes: split.remaining }));
+				await plugin.vault.write(target.path, renderLectureNote({ course, date: opts.date, myNotes: split.remaining, kind }));
 				created = true;
 			}
 		} else {
-			created = await plugin.vault.createIfMissing(target.path, renderLectureNote({ course, date: opts.date, myNotes: notes }));
+			created = await plugin.vault.createIfMissing(target.path, renderLectureNote({ course, date: opts.date, myNotes: notes, kind }));
 			if (!created) await plugin.vault.writeSection(target, SECTION_MY_NOTES, notes, "append");
 		}
 		await plugin.ensureCourseLink(course, opts.date, target.path);
@@ -63,7 +67,7 @@ export async function importNotesAsLecture(plugin: LectureCompanionPlugin, opts:
 	const todosAdded = await plugin.addCourseTodos(course, todos);
 
 	let slides = false;
-	if (opts.matchSlides !== "off" && plugin.canvas.configured) {
+	if (opts.matchSlides !== "off" && plugin.canvas.configured && kind === "lecture") {
 		const before = cleanTranscript((await plugin.vault.readSection(target, SECTION_SLIDES)) ?? "", false);
 		if (!before) {
 			await plugin.matchSlides(course, opts.date, target, notes, opts.matchSlides);
@@ -100,6 +104,33 @@ export interface ImportChoice {
 	date: string;
 	matchSlides: "ask" | "auto" | "off";
 	summarize: boolean;
+	meeting: boolean;
+}
+
+/**
+ * "Meeting, not a class" checkbox for the import dialogs. Ticked (and locked) when the typed name
+ * is already a meeting series; ticking it disables the Slides choice.
+ */
+export function meetingCheckbox(form: HTMLElement, course: HTMLInputElement, plugin: LectureCompanionPlugin, slides: HTMLSelectElement): HTMLInputElement {
+	form.createEl("label", { text: "Meeting" });
+	const label = form.createEl("label", { cls: "lc-import-check" });
+	const box = label.createEl("input", { type: "checkbox" });
+	label.appendText(" A meeting, not a class (no Canvas; summary lists decisions and action items)");
+	let touched = false;
+	const sync = () => {
+		const known = plugin.isMeeting(course.value);
+		if (known) box.checked = true;
+		else if (!touched) box.checked = false;
+		box.disabled = known;
+		slides.disabled = box.checked;
+	};
+	course.addEventListener("input", sync);
+	box.addEventListener("change", () => {
+		touched = true;
+		sync();
+	});
+	sync();
+	return box;
 }
 
 /** Asks for course and date (and what to run) before importing. */
@@ -151,6 +182,7 @@ export class ImportModal extends Modal {
 			slides.createEl("option", { text: label, attr: { value: v } });
 		}
 		slides.value = this.defaults.matchSlides ?? this.plugin.settings.slideMatching;
+		const meeting = meetingCheckbox(form, course, this.plugin, slides);
 
 		form.createEl("label", { text: "Summary" });
 		const summarizeLabel = form.createEl("label", { cls: "lc-import-check" });
@@ -169,8 +201,9 @@ export class ImportModal extends Modal {
 			this.finish({
 				course: course.value.trim(),
 				date: date?.value || this.defaults.date || toISODate(),
-				matchSlides: slides.value === "auto" ? "auto" : slides.value === "off" ? "off" : "ask",
+				matchSlides: meeting.checked ? "off" : slides.value === "auto" ? "auto" : slides.value === "off" ? "off" : "ask",
 				summarize: summarize.checked,
+				meeting: meeting.checked,
 			});
 		});
 		buttons.createEl("button", { text: "Cancel" }).addEventListener("click", () => this.finish(null));

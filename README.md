@@ -195,6 +195,24 @@ note's folder: one course, dates from the file names (`2026-11-05`, `11-05-2026`
 all work; otherwise the file's creation date), slide matching set to automatic. Notes that are
 already lectures are skipped, so it is safe to run twice.
 
+### Meetings (work, clubs, 1:1s)
+
+Not everything you record is a class. Type any name in the course box (`Robotics Club`,
+`1:1 with Sam`), tick **Meeting** next to it, and record as usual. A meeting:
+
+- is filed under its own folder: `Meetings/<name>/<date>.md`, with a series note
+  `Meetings/<name>.md` that lists them under *Meetings* and keeps the *TODO* list;
+- is **never looked up in Canvas**: no slide matching, no "No Canvas course matches" notice, and
+  the name is never saved as an alias for a course;
+- has no Slides section, and its summary is written for meetings: *Overview*, *Discussion*,
+  *Decisions*, *Action items* (as checkboxes, with owners when the transcript makes them clear)
+  and *Open questions*. The action items are also added to the series TODO list.
+
+Ticking the box adds the name to *Settings → Meetings → Meeting series*; after that the box ticks
+itself whenever you type that name. You can also list names there by hand, and any folder already
+inside the meeting folder counts as a meeting series. The import dialogs (*paste*, *import note*,
+*split*, *import folder*) have the same checkbox.
+
 ### Commands
 
 | Command | What it does |

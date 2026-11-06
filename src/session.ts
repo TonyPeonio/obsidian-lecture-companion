@@ -4,7 +4,7 @@
 import { Notice } from "obsidian";
 import { Chunker } from "./core/audio/chunker";
 import { TranscriptionPipeline, type PipelineProgress, type TranscriptSegment } from "./core/audio/pipeline";
-import { safeFileName, SECTION_MY_NOTES, SECTION_SLIDES, SECTION_SUMMARY, SECTION_TRANSCRIPT, toISODate, transcriptToMarkdown } from "./core/notes";
+import { extractTodos, safeFileName, sectionBody, SECTION_MY_NOTES, SECTION_SLIDES, SECTION_SUMMARY, SECTION_TRANSCRIPT, toISODate, transcriptToMarkdown } from "./core/notes";
 import { summarizeLecture } from "./core/summarize";
 import { transcribeWav } from "./core/whisper/client";
 import type LectureCompanionPlugin from "./main";
@@ -366,6 +366,9 @@ export class LectureSession {
 				throw new Error("Nothing to summarize: the Transcript and My notes sections are empty. Record the lecture or paste your notes under My notes first.");
 			}
 			const settings = this.plugin.settings;
+			// The live session's course, else whatever the note itself says (the command runs on any open note).
+			const series = meta?.course ?? (target === this.target && this.course ? this.course : await this.plugin.seriesOfNote(target.path));
+			const kind = this.plugin.noteKind(series);
 			const text = await summarizeLecture(
 				this.plugin.ollama,
 				{
@@ -375,10 +378,11 @@ export class LectureSession {
 					think: settings.thinking === "auto" ? undefined : settings.thinking === "on",
 				},
 				{
-					course: meta?.course ?? (this.course || target.path),
-					date: meta?.date ?? (this.date || toISODate()),
+					course: series,
+					date: meta?.date ?? (target === this.target && this.date ? this.date : (/(\d{4}-\d{2}-\d{2})/.exec(target.parentHeading ?? target.path)?.[1] ?? toISODate())),
 					transcript,
 					source,
+					kind,
 					slideText: slideText || undefined,
 					extraInstructions: settings.summaryInstructions,
 				},
@@ -390,6 +394,12 @@ export class LectureSession {
 			);
 			this.summary = text;
 			await this.plugin.vault.writeSection(target, SECTION_SUMMARY, text || "_The model returned an empty summary._", "replace");
+			// A meeting's action items also go to the series note's TODO list (already-listed ones are skipped).
+			if (kind === "meeting" && text) {
+				const items = extractTodos(sectionBody(text, "Action items") ?? "").todos;
+				const added = await this.plugin.addCourseTodos(series, items);
+				if (added > 0) new Notice(`${added} action item${added === 1 ? "" : "s"} added to the ${series} TODO list.`, 6000);
+			}
 			this.status = "done";
 			this.emit();
 			return text;

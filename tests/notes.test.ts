@@ -26,7 +26,51 @@ import {
 	upsertSection,
 } from "../src/core/notes";
 import { buildSummaryMessages, fitToContext, stripThinkTags } from "../src/core/summarize";
-import { addCourseAlias, courseNoteOverride, DEFAULT_SETTINGS, parseCourseNotes, parseKeyValueLines, setCourseAlias, vaultCourseName } from "../src/settings";
+import { addCourseAlias, addMeeting, courseNoteOverride, DEFAULT_SETTINGS, meetingList, parseCourseNotes, parseKeyValueLines, setCourseAlias, vaultCourseName } from "../src/settings";
+
+describe("meetings", () => {
+	it("renders a meeting note with the meeting tag and no Slides section", () => {
+		const md = renderLectureNote({ course: "Robotics Club", date: "2026-11-06", kind: "meeting" });
+		expect(md).toContain("  - meeting");
+		expect(md).not.toContain("  - lecture");
+		expect(md).not.toContain("## Slides");
+		expect(md).toContain("## Summary");
+		expect(md).toContain("## Transcript");
+		expect(isLectureNote(md)).toBe(true);
+		expect(renderLectureNote({ course: "c", date: "2026-11-06" })).toContain("## Slides");
+	});
+
+	it("lists meetings under a Meetings heading in the series note", () => {
+		const md = addLectureLink("", "2026-11-06", "[[Meetings/Club/2026-11-06|2026-11-06 meeting]]", "## Meetings");
+		expect(md).toContain("## Meetings");
+		expect(md).not.toContain("## Lectures");
+		expect(md).toContain("### 2026-11-06");
+	});
+
+	it("uses the meeting prompt with an Action items checklist", () => {
+		const msgs = buildSummaryMessages({ course: "Robotics Club", date: "2026-11-06", transcript: "t", kind: "meeting" }, 8192);
+		expect(msgs[0]?.content).toContain("### Action items");
+		expect(msgs[0]?.content).toContain("### Decisions");
+		expect(msgs[0]?.content).not.toContain("### Questions to review");
+		expect(msgs[1]?.content).toContain("Meeting: Robotics Club");
+		const lecture = buildSummaryMessages({ course: "CS101", date: "d", transcript: "t" }, 8192);
+		expect(lecture[0]?.content).toContain("### Questions to review");
+		expect(lecture[0]?.content).not.toContain("### Action items");
+	});
+
+	it("pulls action items out of a meeting summary as todos", () => {
+		const summary = "### Overview\nWe met.\n\n### Decisions\n- Use Rust\n\n### Action items\n- [ ] **Sam** — order parts (Friday)\n- [ ] book the room\n\n### Open questions\n- budget?";
+		expect(extractTodos(sectionBody(summary, "Action items") ?? "").todos).toEqual(["- [ ] **Sam** — order parts (Friday)", "- [ ] book the room"]);
+	});
+
+	it("keeps a case-insensitive meeting list", () => {
+		const s = { ...DEFAULT_SETTINGS };
+		expect(addMeeting(s, " Robotics Club ")).toBe(true);
+		expect(addMeeting(s, "robotics club")).toBe(false);
+		expect(addMeeting(s, "1:1 with Sam")).toBe(true);
+		expect(meetingList(s)).toEqual(["Robotics Club", "1:1 with Sam"]);
+	});
+});
 
 describe("paths and formatting", () => {
 	it("sanitizes names and builds paths", () => {

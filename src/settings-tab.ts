@@ -333,6 +333,29 @@ export class LectureCompanionSettingTab extends PluginSettingTab {
 				}),
 			);
 
+		// -------------------------------------------------------------- Meetings
+		new Setting(containerEl).setName("Meetings").setHeading();
+
+		new Setting(containerEl)
+			.setName("Meeting folder")
+			.setDesc("Work, club and other meetings go to <folder>/<name>/<date>.md, with a series note <folder>/<name>.md that lists them and keeps the TODO list.")
+			.addText((t) =>
+				t.setValue(s.meetingFolder).onChange(async (v) => {
+					s.meetingFolder = v.trim().replace(/^\/+|\/+$/g, "") || DEFAULT_SETTINGS.meetingFolder;
+					await save();
+				}),
+			);
+
+		new Setting(containerEl)
+			.setName("Meeting series")
+			.setDesc("One name per line. These are never looked up in Canvas (no slides, no course-name matching); the summary lists decisions and action items, and action items are added to the series TODO list. Ticking Meeting in the panel or import dialog adds a name here; folders already in the meeting folder count too.")
+			.addTextArea((t) =>
+				t.setValue(s.meetings).onChange(async (v) => {
+					s.meetings = v;
+					await save();
+				}),
+			);
+
 		// ---------------------------------------------------------------- Canvas
 		new Setting(containerEl).setName("Canvas LMS (slides)").setHeading();
 

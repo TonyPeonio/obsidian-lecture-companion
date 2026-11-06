@@ -9,6 +9,8 @@ export interface SummaryInput {
 	extraInstructions?: string;
 	/** What `transcript` is: speech-to-text output (default) or notes the student typed in class. */
 	source?: "transcript" | "notes";
+	/** A meeting (work, club) is summarized as decisions and action items instead of course material. */
+	kind?: "lecture" | "meeting";
 }
 
 export interface SummaryConfig {
@@ -41,6 +43,29 @@ Anything about homework, exams, readings or logistics. Omit the section if there
 2 to 5 questions a student should be able to answer after this lecture.`;
 }
 
+function meetingPrompt(source: "transcript" | "notes"): string {
+	const given =
+		source === "notes"
+			? "You are given the notes someone typed during the meeting (terse, with abbreviations and gaps; expand abbreviations when the meaning is clear)."
+			: "You are given a transcript of the meeting (speech recognition output, so names and terms may be misspelled, and speakers are not labelled; attribute something to a person only when the transcript makes it clear who).";
+	const timestamps = source === "notes" ? "" : " Where a bullet comes from a specific moment, end it with the transcript timestamp in the form [mm:ss].";
+	const material = source === "notes" ? "the notes" : "the transcript";
+	return `You summarize meetings (work, clubs, project teams) for one attendee's own notes.
+${given}
+Write in markdown, in the language of the meeting. Do not invent content that is not in ${material}. Do not add a title or front matter.
+Output exactly these sections:
+### Overview
+2 to 4 sentences: what the meeting was for and where things stand now.
+### Discussion
+4 to 10 bullets on the topics discussed, in order.${timestamps}
+### Decisions
+Bullets for what was agreed or decided. Omit the section if nothing was decided.
+### Action items
+One checkbox per task someone agreed to do, in the form "- [ ] **Owner** — task (due date if one was said)". Leave out the owner when it is not clear who. Omit the section if there are none.
+### Open questions
+Things left unresolved or to follow up on. Omit the section if there are none.`;
+}
+
 /** Rough budget so transcript + slides fit the context window (4 chars ≈ 1 token, with headroom). */
 export function fitToContext(input: SummaryInput, numCtx: number): { transcript: string; slideText: string; truncated: boolean } {
 	const budgetChars = Math.max(4000, Math.floor(numCtx * 3.2) - 2500);
@@ -62,12 +87,14 @@ export function fitToContext(input: SummaryInput, numCtx: number): { transcript:
 
 export function buildSummaryMessages(input: SummaryInput, numCtx: number): ChatMessage[] {
 	const fitted = fitToContext(input, numCtx);
-	const parts = [`Course: ${input.course}`, `Date: ${input.date}`];
+	const meeting = input.kind === "meeting";
+	const parts = [meeting ? `Meeting: ${input.course}` : `Course: ${input.course}`, `Date: ${input.date}`];
 	if (fitted.slideText) parts.push("", "## Slide text", "", fitted.slideText);
-	parts.push("", input.source === "notes" ? "## Student's notes" : "## Transcript", "", fitted.transcript);
-	if (input.extraInstructions?.trim()) parts.push("", "## Additional instructions from the student", "", input.extraInstructions.trim());
+	parts.push("", input.source === "notes" ? (meeting ? "## Notes" : "## Student's notes") : "## Transcript", "", fitted.transcript);
+	if (input.extraInstructions?.trim()) parts.push("", meeting ? "## Additional instructions" : "## Additional instructions from the student", "", input.extraInstructions.trim());
+	const source = input.source ?? "transcript";
 	return [
-		{ role: "system", content: systemPrompt(input.source ?? "transcript") },
+		{ role: "system", content: meeting ? meetingPrompt(source) : systemPrompt(source) },
 		{ role: "user", content: parts.join("\n") },
 	];
 }

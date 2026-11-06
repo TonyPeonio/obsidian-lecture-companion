@@ -1,11 +1,13 @@
 import { type App, Modal, Notice } from "obsidian";
 import type { NoteEntry } from "./core/split";
+import { meetingCheckbox } from "./import";
 import type LectureCompanionPlugin from "./main";
 
 export interface SplitChoice {
 	course: string;
 	matchSlides: "ask" | "auto" | "off";
 	summarize: boolean;
+	meeting: boolean;
 	/** Entries with their (possibly edited) dates; only included ones. */
 	entries: NoteEntry[];
 }
@@ -56,6 +58,7 @@ export class SplitModal extends Modal {
 			slides.createEl("option", { text: label, attr: { value: v } });
 		}
 		slides.value = "auto";
+		const meeting = meetingCheckbox(form, course, this.plugin, slides);
 		form.createEl("label", { text: "Summary" });
 		const sumLabel = form.createEl("label", { cls: "lc-import-check" });
 		const summarize = sumLabel.createEl("input", { type: "checkbox" });
@@ -107,8 +110,9 @@ export class SplitModal extends Modal {
 			}
 			this.finish({
 				course: course.value.trim(),
-				matchSlides: slides.value === "ask" ? "ask" : slides.value === "off" ? "off" : "auto",
+				matchSlides: meeting.checked ? "off" : slides.value === "ask" ? "ask" : slides.value === "off" ? "off" : "auto",
 				summarize: summarize.checked,
+				meeting: meeting.checked,
 				entries: chosen,
 			});
 		});

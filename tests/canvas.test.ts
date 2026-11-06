@@ -123,6 +123,20 @@ describe("helpers", () => {
 		expect(resolveCourse(bio, "CSCI579")).toBeNull();
 	});
 
+	it("resolveCourse does not tie meeting-like names to a course by a year or filler word", () => {
+		const fall = [
+			{ id: 777, name: "Fall 2026 BIOINFORMATICS (CSCI-578-A, CSCI-478-A, BIOL-510-A)", courseCode: "CSCI-578-A" },
+			{ id: 778, name: "Fall 2026 Partial Differential Equations", courseCode: "MA-441" },
+		];
+		expect(resolveCourse(fall, "Club meeting 2026")).toBeNull();
+		expect(resolveCourse(fall, "Fall standup")).toBeNull();
+		expect(resolveCourse(fall, "art")).toBeNull();
+		expect(resolveCourse(fall, "Robotics Club")).toBeNull();
+		expect(resolveCourse(fall, "bioinformatics")?.id).toBe(777);
+		expect(resolveCourse(fall, "differential equations")?.id).toBe(778);
+		expect(resolveCourse(fall, "partial diff eq notes")?.id).toBe(778);
+	});
+
 	it("nextLink", () => {
 		expect(nextLink('<https://a/b?page=2>; rel="next",<https://a/b?page=5>; rel="last"')).toBe("https://a/b?page=2");
 		expect(nextLink('<https://a/b?page=1>; rel="first"')).toBeUndefined();

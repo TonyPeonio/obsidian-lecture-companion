@@ -161,7 +161,7 @@ export class SlideMatcher {
 	/** Deck names already embedded in this course's other lecture notes. */
 	private async previousDeckNames(course: string, exceptPath: string): Promise<string[]> {
 		const names = new Set<string>();
-		for (const path of this.plugin.vault.lectureNotePaths(this.plugin.settings.courseFolder, course)) {
+		for (const path of this.plugin.vault.lectureNotePaths(this.plugin.folderFor(course), course)) {
 			if (path === exceptPath) continue;
 			let md: string;
 			try {
