@@ -1,0 +1,134 @@
+import { describe, expect, it } from "vitest";
+import {
+	courseNotePath,
+	dateHeading,
+	findSection,
+	formatTimestamp,
+	lectureNotePath,
+	nestedSectionBody,
+	renderLectureNote,
+	safeFileName,
+	sectionBody,
+	slidesToMarkdown,
+	startOfDay,
+	toISODate,
+	transcriptToMarkdown,
+	upsertNestedSection,
+	upsertSection,
+} from "../src/core/notes";
+import { buildSummaryMessages, fitToContext, stripThinkTags } from "../src/core/summarize";
+import { courseNoteOverride, DEFAULT_SETTINGS, parseCourseNotes } from "../src/settings";
+
+describe("paths and formatting", () => {
+	it("sanitizes names and builds paths", () => {
+		expect(safeFileName('CS 101: Intro/Advanced? "Yes" [x] #1')).toBe("CS 101- Intro-Advanced- -Yes- -x- -1");
+		expect(lectureNotePath("/Courses/", "CS101", "2026-11-05")).toBe("Courses/CS101/2026-11-05.md");
+		expect(courseNotePath("Courses", "Math: 2")).toBe("Courses/Math- 2.md");
+		expect(dateHeading("## {{date}}", "2026-11-05")).toBe("## 2026-11-05");
+		expect(dateHeading("## Lecture", "2026-11-05")).toBe("## Lecture 2026-11-05");
+	});
+
+	it("timestamps and dates", () => {
+		expect(formatTimestamp(0)).toBe("0:00");
+		expect(formatTimestamp(754.9)).toBe("12:34");
+		expect(formatTimestamp(3661)).toBe("1:01:01");
+		expect(toISODate(new Date(2026, 10, 5, 23, 59))).toBe("2026-11-05");
+		expect(startOfDay("2026-11-05").getHours()).toBe(0);
+		expect(toISODate(startOfDay("2026-11-05"))).toBe("2026-11-05");
+	});
+});
+
+describe("transcript and slides markdown", () => {
+	it("groups segments into timestamped paragraphs at pauses", () => {
+		const md = transcriptToMarkdown([
+			{ start: 0, end: 2, text: "Hello," },
+			{ start: 2.1, end: 4, text: "welcome." },
+			{ start: 9, end: 12, text: "New topic." },
+		]);
+		expect(md).toBe("**[0:00]** Hello, welcome.\n\n**[0:09]** New topic.");
+	});
+
+	it("renders embeds, links and folded slide text", () => {
+		const md = slidesToMarkdown([{ vaultPath: "Courses/CS101/attachments/Week 3.pdf", title: "Week 3", text: "--- Page 1 ---\nIntro", source: "Canvas · Module 4" }]);
+		expect(md).toBe("![[Week 3.pdf]]\n[[Week 3.pdf|Week 3]] — Canvas · Module 4\n\n> [!note]- Slide text: Week 3\n> --- Page 1 ---\n> Intro");
+	});
+
+	it("renders a full lecture note skeleton", () => {
+		const md = renderLectureNote({ course: "CS101", date: "2026-11-05", audioPath: "a/b/rec.webm" });
+		expect(md.startsWith('---\ncourse: "CS101"\ndate: 2026-11-05\ntags:\n  - lecture\naudio: "[[rec.webm]]"\n---\n\n# CS101 — 2026-11-05\n\n## Slides\n\n_No slides yet._\n\n## Summary')).toBe(true);
+		expect(sectionBody(md, "Transcript")).toBe("_No transcript yet._");
+		expect(sectionBody(md, "My notes")).toBe("");
+	});
+});
+
+describe("sections", () => {
+	const note = ["# Title", "", "## Slides", "", "old slide", "", "## Transcript", "", "```", "## not a heading", "```", "words", "", "### Sub", "", "deep", "", "## My notes", "", "mine"].join("\n");
+
+	it("finds sections, skipping fences and including sub-sections", () => {
+		const lines = note.split("\n");
+		expect(findSection(lines, "slides")).toEqual({ headingLine: 2, level: 2, bodyStart: 3, bodyEnd: 6 });
+		expect(findSection(lines, "## Transcript")?.bodyEnd).toBe(17);
+		expect(findSection(lines, "Nope")).toBeNull();
+		expect(sectionBody(note, "Transcript")).toBe("```\n## not a heading\n```\nwords\n\n### Sub\n\ndeep");
+	});
+
+	it("appends, replaces placeholders and creates missing sections", () => {
+		const appended = upsertSection(note, "Slides", "new slide");
+		expect(sectionBody(appended, "Slides")).toBe("old slide\n\nnew slide");
+		expect(sectionBody(appended, "My notes")).toBe("mine");
+		const replaced = upsertSection(note, "Transcript", "fresh", "replace");
+		expect(sectionBody(replaced, "Transcript")).toBe("fresh");
+		expect(replaced).toContain("## My notes\n\nmine");
+		const created = upsertSection("# T\n\ntext\n", "Summary", "sum");
+		expect(created).toBe("# T\n\ntext\n\n## Summary\n\nsum\n");
+		const placeholder = upsertSection("## Slides\n\n_No slides yet._\n", "Slides", "![[a.pdf]]");
+		expect(sectionBody(placeholder, "Slides")).toBe("![[a.pdf]]");
+		expect(upsertSection("", "A", "b")).toBe("## A\n\nb\n");
+	});
+
+	it("upserts nested sections under a date heading", () => {
+		let md = "# CS101\n";
+		md = upsertNestedSection(md, "## 2026-11-04", "Transcript", "yesterday", "replace");
+		md = upsertNestedSection(md, "## 2026-11-05", "Transcript", "today", "replace");
+		md = upsertNestedSection(md, "## 2026-11-05", "Transcript", "more", "append");
+		md = upsertNestedSection(md, "## 2026-11-05", "Slides", "![[x.pdf]]");
+		expect(nestedSectionBody(md, "## 2026-11-04", "Transcript")).toBe("yesterday");
+		expect(nestedSectionBody(md, "## 2026-11-05", "Transcript")).toBe("today\n\nmore");
+		expect(nestedSectionBody(md, "## 2026-11-05", "Slides")).toBe("![[x.pdf]]");
+		expect(md).toContain("### Transcript");
+		expect(md.indexOf("## 2026-11-04")).toBeLessThan(md.indexOf("## 2026-11-05"));
+		expect(nestedSectionBody(md, "## 2026-11-06", "Transcript")).toBeNull();
+	});
+});
+
+describe("summaries", () => {
+	it("fits transcript and slides to the context window", () => {
+		const long = "x".repeat(100_000);
+		const fitted = fitToContext({ course: "c", date: "d", transcript: long, slideText: long }, 8192);
+		expect(fitted.truncated).toBe(true);
+		expect(fitted.transcript.length + fitted.slideText.length).toBeLessThan(8192 * 3.2);
+		expect(fitted.transcript.endsWith("(… transcript truncated here)")).toBe(true);
+		const small = fitToContext({ course: "c", date: "d", transcript: "short" }, 8192);
+		expect(small).toEqual({ transcript: "short", slideText: "", truncated: false });
+	});
+
+	it("builds system + user messages", () => {
+		const msgs = buildSummaryMessages({ course: "CS101", date: "2026-11-05", transcript: "t", slideText: "s", extraInstructions: "German" }, 32768);
+		expect(msgs[0]?.role).toBe("system");
+		expect(msgs[1]?.content).toBe("Course: CS101\nDate: 2026-11-05\n\n## Slide text\n\ns\n\n## Transcript\n\nt\n\n## Additional instructions from the student\n\nGerman");
+		expect(stripThinkTags("<think>hmm</think>\n### Key points")).toBe("### Key points");
+	});
+});
+
+describe("settings helpers", () => {
+	it("parses course note overrides", () => {
+		expect(parseCourseNotes("# comment\n12345 = Courses/CS101\nLinear Algebra=Math/LA.md\nbad line\n")).toEqual([
+			{ key: "12345", path: "Courses/CS101.md" },
+			{ key: "linear algebra", path: "Math/LA.md" },
+		]);
+		const s = { ...DEFAULT_SETTINGS, courseNotes: "12345 = A.md\ncs101 = B.md" };
+		expect(courseNoteOverride(s, { id: 12345, name: "X" })).toBe("A.md");
+		expect(courseNoteOverride(s, { name: "Intro", courseCode: "CS101" })).toBe("B.md");
+		expect(courseNoteOverride(s, { name: "Other" })).toBeUndefined();
+	});
+});
