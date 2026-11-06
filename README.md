@@ -136,7 +136,8 @@ Click the microphone in the ribbon or run **Lecture Companion: Open panel**.
    many seconds behind it is. Pause and resume as needed.
 3. Press **stop**. The plugin finishes the last chunk, saves the audio (Opus, about 20 MB per
    hour) and the transcript into the lecture note, then streams a summary from Ollama into the
-   Summary section.
+   Summary section. For the next class, press **new recording** (or just type the other
+   course and press record): the panel clears and the previous lecture stays in its note.
 4. Before the summary, the plugin **matches slides to the lecture**: it ranks every deck in the
    Canvas course by how much its text overlaps the transcript (with a nudge for the next deck
    in the series and for recently changed files) and shows a picker with the best match
