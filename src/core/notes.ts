@@ -374,3 +374,46 @@ export function replaceAttachmentRefs(markdown: string, oldName: string, newName
 	const esc = oldName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 	return markdown.replace(new RegExp(`\\[\\[(?:[^\\]|]*/)?${esc}(\\||\\]\\])`, "g"), (_m, tail: string) => `[[${newName}${tail}`);
 }
+
+export const SECTION_TODO = "TODO";
+const TASK_MARKERS = /[📅🛫✅⏳🔁➕⏫🔼🔽🔺⏬❌]/u;
+
+/**
+ * Pulls task lines out of notes: `- [ ] …` / `- [x] …` checkboxes and bullets carrying
+ * Tasks-plugin markers (📅 due, 🛫 start, ✅ done, …). Returns the notes without them and the
+ * tasks normalised to checkbox items (✅ or [x] → checked), metadata kept.
+ */
+export function extractTodos(markdown: string): { remaining: string; todos: string[] } {
+	const todos: string[] = [];
+	const kept: string[] = [];
+	for (const line of markdown.split("\n")) {
+		const m = /^(\s*)[-*+]\s+(?:\[([ xX])\]\s+)?(.*)$/.exec(line);
+		const body = m?.[3]?.trim() ?? "";
+		const isCheckbox = m?.[2] !== undefined;
+		const isTask = !!m && body.length > 0 && (isCheckbox || TASK_MARKERS.test(body));
+		if (!isTask) {
+			kept.push(line);
+			continue;
+		}
+		const done = m[2]?.toLowerCase() === "x" || /✅/u.test(body);
+		todos.push(`- [${done ? "x" : " "}] ${body}`);
+	}
+	return { remaining: kept.join("\n").replace(/\n{3,}/g, "\n\n").trim(), todos };
+}
+
+/** Appends tasks to the `## TODO` section (created at the end when missing), skipping ones already there. */
+export function addTodos(markdown: string, todos: string[]): string {
+	const existing = sectionBody(markdown, `## ${SECTION_TODO}`) ?? "";
+	const have = new Set(existing.split("\n").map((l) => l.replace(/^-\s*\[[ xX]\]\s*/, "").trim()).filter(Boolean));
+	const fresh = todos.filter((t) => !have.has(t.replace(/^-\s*\[[ xX]\]\s*/, "").trim()));
+	if (fresh.length === 0) return ensureTodoSection(markdown);
+	// Replace rather than append so the list stays one contiguous block (no blank line between items).
+	const merged = [...existing.split("\n").filter((l) => l.trim().length > 0), ...fresh];
+	return upsertSection(markdown, `## ${SECTION_TODO}`, merged.join("\n"), "replace");
+}
+
+/** Makes sure the course note ends with a `## TODO` section. */
+export function ensureTodoSection(markdown: string): string {
+	if (findSection(markdown.split("\n"), `## ${SECTION_TODO}`)) return markdown;
+	return upsertSection(markdown, `## ${SECTION_TODO}`, "");
+}

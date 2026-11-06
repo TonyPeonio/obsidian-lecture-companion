@@ -2,7 +2,7 @@
 // is matched against it, and the summary is written from notes + slide text.
 
 import { type App, Modal, Notice, TFile, TFolder } from "obsidian";
-import { detectDate, isLectureNote, renderLectureNote, SECTION_MY_NOTES, SECTION_SLIDES, stripFrontmatter, toISODate } from "./core/notes";
+import { detectDate, extractTodos, isLectureNote, renderLectureNote, SECTION_MY_NOTES, SECTION_SLIDES, stripFrontmatter, toISODate } from "./core/notes";
 import type LectureCompanionPlugin from "./main";
 import { cleanTranscript } from "./session";
 import type { NoteTarget } from "./vault";
@@ -23,12 +23,16 @@ export interface ImportResult {
 	created: boolean;
 	slides: boolean;
 	summarized: boolean;
+	/** Tasks moved to the course TODO list. */
+	todos: number;
 }
 
 export async function importNotesAsLecture(plugin: LectureCompanionPlugin, opts: ImportOptions): Promise<ImportResult> {
 	const course = opts.course.trim();
 	if (!course) throw new Error("Choose a course");
-	const notes = opts.text.trim();
+	// Task lines go to the course note's TODO list instead of staying in the day's notes.
+	const { remaining, todos } = extractTodos(opts.text.trim());
+	const notes = remaining || (todos.length ? "_Only tasks; see the course TODO list._" : "");
 	if (!notes) throw new Error("The note is empty");
 	await plugin.learnCourseAlias(course);
 
@@ -41,7 +45,9 @@ export async function importNotesAsLecture(plugin: LectureCompanionPlugin, opts:
 			// Upgrade the existing file: keep its text, add the layout around it.
 			const existing = await plugin.vault.read(target.path);
 			if (!isLectureNote(existing)) {
-				await plugin.vault.write(target.path, renderLectureNote({ course, date: opts.date, myNotes: stripFrontmatter(existing) }));
+				const split = extractTodos(stripFrontmatter(existing));
+				todos.push(...split.todos);
+				await plugin.vault.write(target.path, renderLectureNote({ course, date: opts.date, myNotes: split.remaining }));
 				created = true;
 			}
 		} else {
@@ -53,6 +59,8 @@ export async function importNotesAsLecture(plugin: LectureCompanionPlugin, opts:
 		await plugin.ensureLectureNote(course, opts.date);
 		await plugin.vault.writeSection(target, SECTION_MY_NOTES, notes, "append");
 	}
+
+	const todosAdded = await plugin.addCourseTodos(course, todos);
 
 	let slides = false;
 	if (opts.matchSlides !== "off" && plugin.canvas.configured) {
@@ -70,7 +78,7 @@ export async function importNotesAsLecture(plugin: LectureCompanionPlugin, opts:
 		await plugin.session.summarize(target, { course, date: opts.date });
 		summarized = true;
 	}
-	return { target, created, slides, summarized };
+	return { target, created, slides, summarized, todos: todosAdded };
 }
 
 /** Notes in a folder that are not lecture notes yet, with the date each file name implies. */

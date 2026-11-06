@@ -17,7 +17,8 @@ summaries through [Ollama](https://ollama.com).
   can use it.
 - **One note per lecture.** `Courses/<course>/<date>.md` with Slides, Summary, Transcript and
   My notes sections; the course note `Courses/<course>.md` lists them under *Lectures* with a
-  heading per date. Or keep everything under date headings inside one note per course.
+  heading per date and keeps a *TODO* list. Or keep everything under date headings inside one
+  note per course.
 - **Summaries that cite timestamps.** Key points, definitions, formulas, announcements and
   review questions, each pointing back to `[mm:ss]` in the transcript.
 
@@ -174,6 +175,12 @@ contains one), and creates `Courses/<course>/<date>.md` in the lecture layout wi
 under *My notes*. It then matches the deck against your notes instead of a transcript and
 writes the summary from notes + slide text. If the open note already sits at the lecture path,
 it is upgraded in place; otherwise your original is left untouched.
+
+**Tasks move to the course TODO list.** Lines like `- [ ] read chapter 3` or bullets with
+Tasks-plugin markers (`* Homework 2 📅 2026-09-06 ✅ 2026-09-04`) are taken out of the imported
+notes and appended, as checkboxes, under `## TODO` in the course note (done ones checked, dates
+kept), so one list tracks the whole course. **Move tasks from this note to the course TODO list**
+does the same for a lecture note later.
 
 **One file with the whole semester in it?** If the note holds several dated entries (headers
 like `Lecture 2 - 8.26.26`, `Meeting with Caleb - 9/11/2026`, `## Week 3: trees`), *Import this

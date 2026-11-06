@@ -2,7 +2,7 @@ import { Modal, Notice, Platform, Plugin, requestUrl, TFile, type App, type Work
 import { describePull, pullSlides } from "./canvas-pull";
 import { CanvasClient, resolveCourse, type CanvasCourse } from "./core/canvas";
 import type { HttpRequest } from "./core/http";
-import { addLectureLink, courseNotePath, replaceAttachmentRefs, dateHeading, detectDate, lectureNotePath, migrateCourseIndex, renderLectureNote, SECTION_SLIDES, SECTION_TRANSCRIPT, stripFrontmatter, toISODate } from "./core/notes";
+import { addLectureLink, addTodos, courseNotePath, ensureTodoSection, extractTodos, replaceAttachmentRefs, SECTION_MY_NOTES, dateHeading, detectDate, lectureNotePath, migrateCourseIndex, renderLectureNote, SECTION_SLIDES, SECTION_TRANSCRIPT, stripFrontmatter, toISODate } from "./core/notes";
 import { ImportModal, importNotesAsLecture, listImportableNotes } from "./import";
 import { groupEntriesByDate, splitEntries } from "./core/split";
 import { SplitModal, type SplitChoice } from "./split-modal";
@@ -179,6 +179,16 @@ export default class LectureCompanionPlugin extends Plugin {
 			},
 		});
 		this.addCommand({
+			id: "move-todos",
+			name: "Move tasks from this note to the course TODO list",
+			checkCallback: (checking) => {
+				const file = this.app.workspace.getActiveFile();
+				if (!(file instanceof TFile) || file.extension !== "md") return false;
+				if (!checking) void this.moveTodosFromNote(file.path);
+				return true;
+			},
+		});
+		this.addCommand({
 			id: "convert-pptx-in-note",
 			name: "Convert PowerPoint decks in this note to PDF",
 			checkCallback: (checking) => {
@@ -334,7 +344,43 @@ export default class LectureCompanionPlugin extends Plugin {
 		const coursePath = courseNotePath(this.settings.courseFolder, course);
 		const link = `[[${lecturePath.replace(/\.md$/, "")}|${date} lecture]]`;
 		const f = this.vault.file(coursePath) ?? (await this.vault.write(coursePath, ""));
-		await this.app.vault.process(f, (md) => addLectureLink(md, date, link));
+		await this.app.vault.process(f, (md) => ensureTodoSection(addLectureLink(md, date, link)));
+	}
+
+	/** Moves task lines into the course note's `## TODO` section. Returns how many were added. */
+	async addCourseTodos(course: string, todos: string[]): Promise<number> {
+		if (todos.length === 0) return 0;
+		const coursePath = courseNotePath(this.settings.courseFolder, course);
+		const f = this.vault.file(coursePath) ?? (await this.vault.write(coursePath, ""));
+		let added = 0;
+		await this.app.vault.process(f, (md) => {
+			const out = addTodos(md, todos);
+			added = (out.match(/^- \[[ xX]\]/gm)?.length ?? 0) - (md.match(/^- \[[ xX]\]/gm)?.length ?? 0);
+			return out;
+		});
+		return Math.max(0, added);
+	}
+
+	/** "Move tasks from this note to the course TODO": pulls task lines out of the open note's My notes section. */
+	async moveTodosFromNote(path: string): Promise<void> {
+		const md = await this.vault.read(path);
+		const fm = /^---\n([\s\S]*?)\n---/.exec(md)?.[1] ?? "";
+		const parts = path.split("/");
+		const course = /^course:\s*"?(.*?)"?\s*$/m.exec(fm)?.[1]?.trim() || (parts.length >= 2 ? (parts[parts.length - 2] ?? "") : "");
+		if (!course) {
+			new Notice("Cannot tell which course this note belongs to (no course in frontmatter or folder).");
+			return;
+		}
+		const target: NoteTarget = { path };
+		const notes = (await this.vault.readSection(target, SECTION_MY_NOTES)) ?? "";
+		const { remaining, todos } = extractTodos(notes);
+		if (todos.length === 0) {
+			new Notice("No task lines found under My notes.");
+			return;
+		}
+		await this.vault.writeSection(target, SECTION_MY_NOTES, remaining, "replace");
+		const added = await this.addCourseTodos(course, todos);
+		new Notice(`${todos.length} task${todos.length === 1 ? "" : "s"} moved to ${courseNotePath(this.settings.courseFolder, course)} (${added} new).`);
 	}
 
 	/** Rebuilds the course note's lecture list from the notes on disk (and converts the old per-date layout). */

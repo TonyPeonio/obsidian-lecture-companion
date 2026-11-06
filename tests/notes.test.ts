@@ -4,6 +4,9 @@ import {
 	courseNotePath,
 	detectDate,
 	migrateCourseIndex,
+	addTodos,
+	ensureTodoSection,
+	extractTodos,
 	replaceAttachmentRefs,
 	isLectureNote,
 	stripFrontmatter,
@@ -226,5 +229,32 @@ describe("replaceAttachmentRefs", () => {
 	it("repoints embeds, links and aliased links by file name", () => {
 		const md = "![[Deck.pptx]]\n[[Deck.pptx|Deck]] — Canvas\n[[Courses/X/attachments/Deck.pptx]]\n![[Other.pptx]]";
 		expect(replaceAttachmentRefs(md, "Deck.pptx", "Deck.pdf")).toBe("![[Deck.pdf]]\n[[Deck.pdf|Deck]] — Canvas\n[[Deck.pdf]]\n![[Other.pptx]]");
+	});
+});
+
+describe("todos", () => {
+	const notes = "Course Goals:\n\n* Practice agile\n* Bookclub reflection 🛫 2026-08-26 📅 2026-08-30 ✅ 2026-08-27\n* Elevator Pitch Slide 🛫 2026-08-26 📅 2026-09-02\n- [ ] read chapter 3\n- [x] set up Trello\n\nMore prose.";
+
+	it("extracts checkbox and Tasks-plugin lines, normalised, and keeps the rest", () => {
+		const { remaining, todos } = extractTodos(notes);
+		expect(todos).toEqual([
+			"- [x] Bookclub reflection 🛫 2026-08-26 📅 2026-08-30 ✅ 2026-08-27",
+			"- [ ] Elevator Pitch Slide 🛫 2026-08-26 📅 2026-09-02",
+			"- [ ] read chapter 3",
+			"- [x] set up Trello",
+		]);
+		expect(remaining).toBe("Course Goals:\n\n* Practice agile\n\nMore prose.");
+		expect(extractTodos("no tasks here").todos).toEqual([]);
+	});
+
+	it("appends to the course TODO section without duplicates and ensures the section exists", () => {
+		let md = addLectureLink("", "2026-08-24", "[[Courses/X/2026-08-24|2026-08-24 lecture]]");
+		md = ensureTodoSection(md);
+		expect(md).toBe("## Lectures\n\n### 2026-08-24\n\n- [[Courses/X/2026-08-24|2026-08-24 lecture]]\n\n## TODO\n\n\n");
+		md = addTodos(md, ["- [ ] Test1", "- [x] done thing"]);
+		expect(sectionBody(md, "TODO")).toBe("- [ ] Test1\n- [x] done thing");
+		md = addTodos(md, ["- [ ] Test1", "- [ ] Test2"]);
+		expect(sectionBody(md, "TODO")).toBe("- [ ] Test1\n- [x] done thing\n- [ ] Test2");
+		expect(ensureTodoSection(md)).toBe(md);
 	});
 });
