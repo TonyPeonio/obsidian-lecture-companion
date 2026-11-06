@@ -23,6 +23,8 @@ export interface LectureNoteInput {
 	summary?: string;
 	/** Vault path of the saved audio, if kept. */
 	audioPath?: string;
+	/** Notes the student wrote (imported lectures). */
+	myNotes?: string;
 }
 
 export const SECTION_SLIDES = "Slides";
@@ -65,6 +67,47 @@ export function safeFileName(name: string): string {
 		.replace(/\s+/g, " ")
 		.replace(/^[\s.-]+|[\s.-]+$/g, "")
 		.slice(0, 120) || "untitled";
+}
+
+/** True when a note already has the lecture layout (frontmatter tag or the four sections). */
+export function isLectureNote(markdown: string): boolean {
+	const fm = /^---\n([\s\S]*?)\n---/.exec(markdown)?.[1] ?? "";
+	if (/^\s*-\s*lecture\s*$/m.test(fm)) return true;
+	const lines = markdown.split("\n");
+	return !!(findSection(lines, SECTION_TRANSCRIPT) && findSection(lines, SECTION_SUMMARY) && findSection(lines, SECTION_MY_NOTES));
+}
+
+/** First date in a file name or text: 2026-11-05, 2026_11_05, 20261105, 11-05-2026, 11/5/26, "Nov 5 2026", "5 November 2026". */
+export function detectDate(text: string, now: Date = new Date()): string | null {
+	const iso = /(\d{4})[-_.]?(\d{2})[-_.]?(\d{2})(?!\d)/.exec(text);
+	if (iso && valid(+iso[1], +iso[2], +iso[3])) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+	const us = /(?<!\d)(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})(?!\d)/.exec(text);
+	if (us) {
+		const y = us[3].length === 2 ? 2000 + +us[3] : +us[3];
+		if (valid(y, +us[1], +us[2])) return `${y}-${pad(+us[1])}-${pad(+us[2])}`;
+	}
+	const months = "jan feb mar apr may jun jul aug sep oct nov dec".split(" ");
+	const named = /(?:(\d{1,2})(?:st|nd|rd|th)?\s+)?\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s*(\d{1,2})?(?:st|nd|rd|th)?,?\s*(\d{4})?/i.exec(text);
+	if (named) {
+		const m = months.indexOf(named[2].toLowerCase().slice(0, 3)) + 1;
+		const d = +(named[1] ?? named[3] ?? "0");
+		const y = named[4] ? +named[4] : now.getFullYear();
+		if (d && valid(y, m, d)) return `${y}-${pad(m)}-${pad(d)}`;
+	}
+	return null;
+}
+
+function valid(y: number, m: number, d: number): boolean {
+	return y >= 2000 && y <= 2100 && m >= 1 && m <= 12 && d >= 1 && d <= 31;
+}
+
+function pad(n: number): string {
+	return String(n).padStart(2, "0");
+}
+
+/** Body of a note without its frontmatter. */
+export function stripFrontmatter(markdown: string): string {
+	return markdown.replace(/^---\n[\s\S]*?\n---\n?/, "");
 }
 
 export function dateHeading(template: string, date: string): string {
@@ -153,6 +196,7 @@ export function renderLectureNote(input: LectureNoteInput): string {
 		"",
 		`## ${SECTION_MY_NOTES}`,
 		"",
+		input.myNotes?.trim() ?? "",
 		"",
 	];
 	return `${fm.join("\n")}\n\n${sections.join("\n")}`;

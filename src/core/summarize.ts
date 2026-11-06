@@ -3,10 +3,12 @@ import type { ChatMessage, OllamaClient } from "./ollama";
 export interface SummaryInput {
 	course: string;
 	date: string;
-	/** Markdown transcript with [mm:ss] markers, or plain text. */
+	/** Markdown transcript with [mm:ss] markers, or the student's own notes (see `source`). */
 	transcript: string;
 	slideText?: string;
 	extraInstructions?: string;
+	/** What `transcript` is: speech-to-text output (default) or notes the student typed in class. */
+	source?: "transcript" | "notes";
 }
 
 export interface SummaryConfig {
@@ -16,12 +18,19 @@ export interface SummaryConfig {
 	think?: boolean;
 }
 
-const SYSTEM_PROMPT = `You summarize university lectures for a student's own notes.
-You are given a transcript (speech recognition output, so names and terms may be misspelled; use the slide text to correct them) and, when available, the text of the slides.
-Write in markdown, in the language of the lecture. Do not invent content that is not in the transcript or slides. Do not add a title or front matter.
+function systemPrompt(source: "transcript" | "notes"): string {
+	const given =
+		source === "notes"
+			? "You are given the notes a student typed during the lecture (terse, with abbreviations and gaps; expand abbreviations when the meaning is clear) and, when available, the text of the slides."
+			: "You are given a transcript (speech recognition output, so names and terms may be misspelled; use the slide text to correct them) and, when available, the text of the slides.";
+	const timestamps = source === "notes" ? "" : " Where a bullet comes from a specific moment, end it with the transcript timestamp in the form [mm:ss].";
+	const material = source === "notes" ? "the notes or slides" : "the transcript or slides";
+	return `You summarize university lectures for a student's own notes.
+${given}
+Write in markdown, in the language of the lecture. Do not invent content that is not in ${material}. Do not add a title or front matter.
 Output exactly these sections:
 ### Key points
-5 to 12 bullets covering what was taught, in lecture order. Where a bullet comes from a specific moment, end it with the transcript timestamp in the form [mm:ss].
+5 to 12 bullets covering what was taught, in lecture order.${timestamps}
 ### Terms and definitions
 Bullets of "**term** — definition" for concepts introduced or defined. Omit the section if there are none.
 ### Worked examples and formulas
@@ -30,6 +39,7 @@ Bullets for any examples, derivations or formulas (use LaTeX between $ signs for
 Anything about homework, exams, readings or logistics. Omit the section if there are none.
 ### Questions to review
 2 to 5 questions a student should be able to answer after this lecture.`;
+}
 
 /** Rough budget so transcript + slides fit the context window (4 chars ≈ 1 token, with headroom). */
 export function fitToContext(input: SummaryInput, numCtx: number): { transcript: string; slideText: string; truncated: boolean } {
@@ -54,10 +64,10 @@ export function buildSummaryMessages(input: SummaryInput, numCtx: number): ChatM
 	const fitted = fitToContext(input, numCtx);
 	const parts = [`Course: ${input.course}`, `Date: ${input.date}`];
 	if (fitted.slideText) parts.push("", "## Slide text", "", fitted.slideText);
-	parts.push("", "## Transcript", "", fitted.transcript);
+	parts.push("", input.source === "notes" ? "## Student's notes" : "## Transcript", "", fitted.transcript);
 	if (input.extraInstructions?.trim()) parts.push("", "## Additional instructions from the student", "", input.extraInstructions.trim());
 	return [
-		{ role: "system", content: SYSTEM_PROMPT },
+		{ role: "system", content: systemPrompt(input.source ?? "transcript") },
 		{ role: "user", content: parts.join("\n") },
 	];
 }

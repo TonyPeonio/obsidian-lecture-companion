@@ -2,7 +2,8 @@ import { Modal, Notice, Platform, Plugin, requestUrl, TFile, type App, type Work
 import { describePull, pullSlides } from "./canvas-pull";
 import { CanvasClient, resolveCourse, type CanvasCourse } from "./core/canvas";
 import type { HttpRequest } from "./core/http";
-import { courseNotePath, dateHeading, lectureNotePath, renderLectureNote, SECTION_SLIDES, SECTION_TRANSCRIPT, toISODate } from "./core/notes";
+import { courseNotePath, dateHeading, detectDate, lectureNotePath, renderLectureNote, SECTION_SLIDES, SECTION_TRANSCRIPT, stripFrontmatter, toISODate } from "./core/notes";
+import { ImportModal, importNotesAsLecture, listImportableNotes } from "./import";
 import { SlideMatcher } from "./slide-matcher";
 import { OllamaClient } from "./core/ollama";
 import { locateWhisperServer } from "./core/whisper/locate";
@@ -118,6 +119,29 @@ export default class LectureCompanionPlugin extends Plugin {
 			name: "Pull Canvas slides for a date…",
 			callback: () => {
 				new DateModal(this.app, (date) => void this.pullSlidesCommand(date)).open();
+			},
+		});
+		this.addCommand({
+			id: "import-note",
+			name: "Import this note as a lecture (my notes → slides + summary)",
+			checkCallback: (checking) => {
+				const file = this.app.workspace.getActiveFile();
+				if (!(file instanceof TFile) || file.extension !== "md" || this.session.isBusy) return false;
+				if (!checking) {
+					const editor = this.app.workspace.activeEditor?.editor;
+					void this.importActiveNote(editor?.getSelection() || undefined);
+				}
+				return true;
+			},
+		});
+		this.addCommand({
+			id: "import-folder",
+			name: "Import all notes in this folder as lectures",
+			checkCallback: (checking) => {
+				const file = this.app.workspace.getActiveFile();
+				if (!(file instanceof TFile) || this.session.isBusy) return false;
+				if (!checking) void this.importFolder();
+				return true;
 			},
 		});
 		this.addCommand({
@@ -280,7 +304,13 @@ export default class LectureCompanionPlugin extends Plugin {
 
 	/** Called by the session after the transcript is written and before the summary. */
 	async matchSlidesForSession(course: string, date: string, target: NoteTarget, transcript: string): Promise<void> {
-		if (!this.canvas.configured || this.settings.slideMatching === "off") return;
+		if (this.settings.slideMatching === "off") return;
+		await this.matchSlides(course, date, target, transcript, this.settings.slideMatching);
+	}
+
+	/** Matches a deck against `text` (transcript or the student's notes) when the Slides section is still empty. */
+	async matchSlides(course: string, date: string, target: NoteTarget, text: string, mode: "ask" | "auto"): Promise<void> {
+		if (!this.canvas.configured) return;
 		const existing = cleanTranscript((await this.vault.readSection(target, SECTION_SLIDES)) ?? "", false);
 		if (existing) return; // slides already chosen for this lecture
 		if (this.courses.length === 0) await this.refreshCourses();
@@ -291,7 +321,7 @@ export default class LectureCompanionPlugin extends Plugin {
 		}
 		const notice = new Notice("Matching slides to the lecture…", 0);
 		try {
-			const result = await this.matcher.run({ canvasCourse, course, date, target, transcript, windowOnly: false, mode: this.settings.slideMatching, replace: false, onStatus: (m) => notice.setMessage(m) });
+			const result = await this.matcher.run({ canvasCourse, course, date, target, transcript: text, windowOnly: false, mode, replace: false, onStatus: (m) => notice.setMessage(m) });
 			notice.hide();
 			if (result.attached.length) new Notice(`Attached: ${result.attached.join(", ")}`, 6000);
 			else if (!result.skipped && result.candidates === 0) new Notice("No slide files found in that Canvas course.", 6000);
@@ -300,6 +330,76 @@ export default class LectureCompanionPlugin extends Plugin {
 			notice.hide();
 			throw err;
 		}
+	}
+
+	/** "Import this note as a lecture": the open note (or selection) becomes My notes of a lecture note. */
+	async importActiveNote(selection?: string): Promise<void> {
+		const file = this.app.workspace.getActiveFile();
+		if (!file) return;
+		const md = await this.app.vault.cachedRead(file);
+		const text = selection?.trim() || stripFrontmatter(md);
+		if (!text.trim()) {
+			new Notice("The note is empty.");
+			return;
+		}
+		const parts = file.path.split("/");
+		const folderName = parts.length >= 2 ? (parts[parts.length - 2] ?? "") : "";
+		const guessCourse = this.courseNames().find((c) => c === folderName) ?? "";
+		const choice = await new ImportModal(this.app, this, `Import "${file.basename}" as a lecture`, {
+			course: guessCourse,
+			date: detectDate(file.basename) ?? detectDate(md.slice(0, 400)) ?? toISODate(new Date(file.stat.ctime)),
+		}).ask();
+		if (!choice) return;
+		const notice = new Notice("Importing…", 0);
+		try {
+			const result = await importNotesAsLecture(this, { ...choice, text, sourcePath: selection ? undefined : file.path });
+			notice.hide();
+			new Notice(`${result.created ? "Created" : "Updated"} ${result.target.path}${result.summarized ? " with a summary" : ""}.`, 8000);
+			await this.vault.open(result.target.path);
+		} catch (err) {
+			notice.hide();
+			new Notice(`Import failed: ${(err as Error).message}`, 10_000);
+		}
+	}
+
+	/** "Import all notes in this folder": every non-lecture note in the active note's folder, one course, dates from file names. */
+	async importFolder(): Promise<void> {
+		const file = this.app.workspace.getActiveFile();
+		const folder = file?.parent;
+		if (!folder) {
+			new Notice("Open a note inside the folder you want to import.");
+			return;
+		}
+		const notes = await listImportableNotes(this, folder);
+		if (notes.length === 0) {
+			new Notice("No importable notes here (notes that are already lectures are skipped).");
+			return;
+		}
+		const undated = notes.filter((n) => !n.date);
+		const choice = await new ImportModal(
+			this.app,
+			this,
+			`Import ${notes.length} note${notes.length === 1 ? "" : "s"} from "${folder.name}"${undated.length ? ` (${undated.length} without a date in the name will use the file's creation date)` : ""}`,
+			{ course: this.courseNames().find((c) => c === folder.name) ?? "", matchSlides: "auto" },
+			false,
+		).ask();
+		if (!choice) return;
+		const notice = new Notice("Importing…", 0);
+		let done = 0;
+		const failures: string[] = [];
+		for (const n of notes) {
+			const date = n.date ?? toISODate(new Date(n.file.stat.ctime));
+			notice.setMessage(`Importing ${n.file.basename} (${done + 1}/${notes.length})…`);
+			try {
+				const md = await this.app.vault.cachedRead(n.file);
+				await importNotesAsLecture(this, { ...choice, date, text: stripFrontmatter(md), sourcePath: n.file.path });
+				done++;
+			} catch (err) {
+				failures.push(`${n.file.basename}: ${(err as Error).message}`);
+			}
+		}
+		notice.hide();
+		new Notice(`Imported ${done} of ${notes.length} notes into ${this.settings.courseFolder}/${choice.course}.${failures.length ? ` Failed: ${failures.join("; ")}` : ""}`, 12_000);
 	}
 
 	/** "Choose slides for this lecture note": re-pick from the whole course and replace the Slides section. */

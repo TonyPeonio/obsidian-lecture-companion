@@ -4,7 +4,7 @@
 import { Notice } from "obsidian";
 import { Chunker } from "./core/audio/chunker";
 import { TranscriptionPipeline, type PipelineProgress, type TranscriptSegment } from "./core/audio/pipeline";
-import { safeFileName, SECTION_SLIDES, SECTION_SUMMARY, SECTION_TRANSCRIPT, toISODate, transcriptToMarkdown } from "./core/notes";
+import { safeFileName, SECTION_MY_NOTES, SECTION_SLIDES, SECTION_SUMMARY, SECTION_TRANSCRIPT, toISODate, transcriptToMarkdown } from "./core/notes";
 import { summarizeLecture } from "./core/summarize";
 import { transcribeWav } from "./core/whisper/client";
 import type LectureCompanionPlugin from "./main";
@@ -279,7 +279,7 @@ export class LectureSession {
 	}
 
 	/** Summarizes the current session's transcript (or the target note's sections) into the Summary section. */
-	async summarize(target: NoteTarget | undefined = this.target): Promise<string> {
+	async summarize(target: NoteTarget | undefined = this.target, meta?: { course: string; date: string }): Promise<string> {
 		if (!target) throw new Error("No lecture note to summarize");
 		// `stop()` calls this while "finishing"; only an active capture must be stopped first.
 		if (this.status === "recording" || this.status === "paused" || this.status === "starting") throw new Error("Stop the recording first");
@@ -289,12 +289,18 @@ export class LectureSession {
 		this.emit();
 		this.summaryAbort = new AbortController();
 		try {
-			// Prefer the note (it holds earlier recordings too); fall back to the live segments.
+			// Prefer the note (it holds earlier recordings too); fall back to the live segments,
+			// then to the student's own notes (imported lectures that were never recorded).
 			const fromNote = cleanTranscript((await this.plugin.vault.readSection(target, SECTION_TRANSCRIPT)) ?? "", false);
-			const transcript = fromNote || (this.segments.length > 0 ? transcriptToMarkdown(this.segments) : "");
+			let transcript = fromNote || (this.segments.length > 0 ? transcriptToMarkdown(this.segments) : "");
+			let source: "transcript" | "notes" = "transcript";
+			if (!transcript.trim()) {
+				transcript = cleanTranscript((await this.plugin.vault.readSection(target, SECTION_MY_NOTES)) ?? "", false);
+				source = "notes";
+			}
 			const slideText = cleanTranscript((await this.plugin.vault.readSection(target, SECTION_SLIDES)) ?? "", false);
 			if (!transcript.trim()) {
-				throw new Error("The transcript is empty, so there is nothing to summarize. Record the lecture (or paste a transcript into the Transcript section) first.");
+				throw new Error("Nothing to summarize: the Transcript and My notes sections are empty. Record the lecture or paste your notes under My notes first.");
 			}
 			const settings = this.plugin.settings;
 			const text = await summarizeLecture(
@@ -306,9 +312,10 @@ export class LectureSession {
 					think: settings.thinking === "auto" ? undefined : settings.thinking === "on",
 				},
 				{
-					course: this.course || target.path,
-					date: this.date || toISODate(),
+					course: meta?.course ?? (this.course || target.path),
+					date: meta?.date ?? (this.date || toISODate()),
 					transcript,
+					source,
 					slideText: slideText || undefined,
 					extraInstructions: settings.summaryInstructions,
 				},

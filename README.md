@@ -153,6 +153,20 @@ Click the microphone in the ribbon or run **Lecture Companion: Open panel**.
    - Decks are downloaded once for matching and their text is cached in the plugin folder
      (`slide-cache.json`), so later matches are instant.
 
+### Already have notes from class?
+
+You don't need to re-record anything. **Import this note as a lecture** takes the open note
+(or just the selected text), asks for the course and date (pre-filled from the file name when it
+contains one), and creates `Courses/<course>/<date>.md` in the lecture layout with your text
+under *My notes*. It then matches the deck against your notes instead of a transcript and
+writes the summary from notes + slide text. If the open note already sits at the lecture path,
+it is upgraded in place; otherwise your original is left untouched.
+
+**Import all notes in this folder as lectures** does the same for every note in the active
+note's folder: one course, dates from the file names (`2026-11-05`, `11-05-2026`, `Nov 5 2026`
+all work; otherwise the file's creation date), slide matching set to automatic. Notes that are
+already lectures are skipped, so it is safe to run twice.
+
 ### Commands
 
 | Command | What it does |
@@ -163,7 +177,7 @@ Click the microphone in the ribbon or run **Lecture Companion: Open panel**.
 | Stop recording and write the note | |
 | Pull today's Canvas slides | Fetches today's new PDF/PPTX files from every active course |
 | Pull Canvas slides for a date… | Same, for a date you choose |
-| Summarize this lecture note | Re-runs the summary on the open note (uses its Slides and Transcript sections) |
+| Summarize this lecture note | Re-runs the summary on the open note (Transcript, or My notes when there is no transcript, plus Slides) |
 | Start / Stop whisper-server | Manual control of the local transcription server |
 
 ### How transcription works

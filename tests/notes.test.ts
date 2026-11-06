@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
 	courseNotePath,
+	detectDate,
+	isLectureNote,
+	stripFrontmatter,
 	dateHeading,
 	findSection,
 	formatTimestamp,
@@ -102,6 +105,32 @@ describe("sections", () => {
 	});
 });
 
+describe("import helpers", () => {
+	it("detects dates in file names and text", () => {
+		expect(detectDate("2026-11-05")).toBe("2026-11-05");
+		expect(detectDate("Lecture notes 2026_11_05 bio")).toBe("2026-11-05");
+		expect(detectDate("20261105 algorithms")).toBe("2026-11-05");
+		expect(detectDate("11-05-2026 class")).toBe("2026-11-05");
+		expect(detectDate("11/5/26")).toBe("2026-11-05");
+		expect(detectDate("Nov 5 2026")).toBe("2026-11-05");
+		expect(detectDate("November 5th, 2026")).toBe("2026-11-05");
+		expect(detectDate("5 Nov 2026")).toBe("2026-11-05");
+		expect(detectDate("Oct 14", new Date(2026, 0, 1))).toBe("2026-10-14");
+		expect(detectDate("Sorting algorithms")).toBeNull();
+		expect(detectDate("CSCI578 week 3")).toBeNull();
+	});
+
+	it("recognises lecture notes and strips frontmatter", () => {
+		expect(isLectureNote(renderLectureNote({ course: "c", date: "2026-11-05" }))).toBe(true);
+		expect(isLectureNote("---\ntags:\n  - lecture\n---\nx")).toBe(true);
+		expect(isLectureNote("# Just notes\n\n- a\n- b")).toBe(false);
+		expect(stripFrontmatter("---\na: 1\n---\nbody\n")).toBe("body\n");
+		expect(stripFrontmatter("no frontmatter")).toBe("no frontmatter");
+		const md = renderLectureNote({ course: "c", date: "2026-11-05", myNotes: "- my bullet" });
+		expect(sectionBody(md, "My notes")).toBe("- my bullet");
+	});
+});
+
 describe("summaries", () => {
 	it("fits transcript and slides to the context window", () => {
 		const long = "x".repeat(100_000);
@@ -118,6 +147,16 @@ describe("summaries", () => {
 		expect(msgs[0]?.role).toBe("system");
 		expect(msgs[1]?.content).toBe("Course: CS101\nDate: 2026-11-05\n\n## Slide text\n\ns\n\n## Transcript\n\nt\n\n## Additional instructions from the student\n\nGerman");
 		expect(stripThinkTags("<think>hmm</think>\n### Key points")).toBe("### Key points");
+	});
+
+	it("adapts the prompt to notes instead of a transcript", () => {
+		const notes = buildSummaryMessages({ course: "c", date: "d", transcript: "- terse bullet", source: "notes" }, 8192);
+		expect(notes[0]?.content).toContain("notes a student typed");
+		expect(notes[0]?.content).not.toContain("[mm:ss]");
+		expect(notes[1]?.content).toContain("## Student's notes");
+		const transcript = buildSummaryMessages({ course: "c", date: "d", transcript: "t" }, 8192);
+		expect(transcript[0]?.content).toContain("[mm:ss]");
+		expect(transcript[1]?.content).toContain("## Transcript");
 	});
 });
 

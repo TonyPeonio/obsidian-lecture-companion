@@ -235,6 +235,27 @@
 	accent-color: var(--interactive-accent);
 }
 
+/* Import dialog */
+.lc-import-form {
+	display: grid;
+	grid-template-columns: auto 1fr;
+	gap: var(--size-4-2) var(--size-4-3);
+	align-items: center;
+	margin-bottom: var(--size-4-3);
+}
+
+.lc-import-form > label:first-child,
+.lc-import-form > label:nth-child(odd) {
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+}
+
+.lc-import-check {
+	display: flex;
+	align-items: center;
+	gap: var(--size-2-2);
+}
+
 .lc-log {
 	max-height: 50vh;
 	overflow: auto;
