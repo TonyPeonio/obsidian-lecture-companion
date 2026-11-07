@@ -147,8 +147,9 @@ Click the microphone in the ribbon or run **Lecture Companion: Open panel**.
    whether it looks like a deck rather than a worksheet, syllabus or paper (file type, words in
    the name or in the page link, page structure); upload dates are ignored. It shows a picker with the best match
    checked. Confirm, and the deck is embedded under *Slides* with its text in a folded
-   callout, so the summary can use them. Set *Match slides to the lecture* to *Automatic* to
-   skip the picker when one deck clearly wins, or *Off*.
+   callout, so the summary can use them. Press **Attach and stop asking** in the picker (or set
+   *Match slides to the lecture* to *Automatic*) to skip the picker from then on whenever one
+   deck clearly wins; it still appears when the match is unclear. *Off* never matches.
    - **Choose slides for this lecture note** re-runs the picker on any lecture note and
      replaces its Slides section (then run *Summarize this lecture note*).
    - **Pull today's Canvas slides** / the **download** button fetch files changed in the

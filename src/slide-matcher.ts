@@ -41,6 +41,8 @@ export interface MatchRequest {
 	mode: "ask" | "auto";
 	/** Replace the Slides section instead of appending to it. */
 	replace: boolean;
+	/** Offer "Attach and stop asking" in the picker, which switches the slide-matching setting to "auto". */
+	offerAutoAccept?: boolean;
 	onStatus?(message: string): void;
 }
 
@@ -71,7 +73,13 @@ export class SlideMatcher {
 		if (req.mode === "auto" && (hasTranscript ? isConfident(ranked) : true)) {
 			chosen = hasTranscript ? ranked.slice(0, 1) : ranked.filter((r) => r.selected);
 		} else {
-			const picked = await new SlidePickerModal(this.plugin.app, req.course, req.date, ranked, hasTranscript).ask();
+			const onAutoAccept = req.offerAutoAccept
+				? async () => {
+						this.plugin.settings.slideMatching = "auto";
+						await this.plugin.saveSettings();
+					}
+				: undefined;
+			const picked = await new SlidePickerModal(this.plugin.app, req.course, req.date, ranked, hasTranscript, onAutoAccept).ask();
 			if (!picked) {
 				result.skipped = true;
 				return result;

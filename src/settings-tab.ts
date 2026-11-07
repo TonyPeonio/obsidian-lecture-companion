@@ -407,7 +407,7 @@ export class LectureCompanionSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Match slides to the lecture")
-			.setDesc("When a recording stops, rank the course's files by overlap with the transcript and by how much they look like a deck (worksheets and syllabi rank low). Ask: show the picker. Auto: attach without asking when one deck clearly wins. Off: never.")
+			.setDesc("When a recording stops, rank the course's files by overlap with the transcript and by how much they look like a deck (worksheets and syllabi rank low). Ask: show the picker. Auto: attach without asking when one deck clearly wins (the picker's \"Attach and stop asking\" button sets this). Off: never.")
 			.addDropdown((d) =>
 				d
 					.addOption("ask", "Ask (show the picker)")

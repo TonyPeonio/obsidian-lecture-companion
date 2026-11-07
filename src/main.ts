@@ -557,7 +557,7 @@ export default class LectureCompanionPlugin extends Plugin {
 		}
 		const notice = new Notice("Matching slides to the lecture…", 0);
 		try {
-			const result = await this.matcher.run({ canvasCourse, course, date, target, transcript: text, windowOnly: false, mode, replace: false, onStatus: (m) => notice.setMessage(m) });
+			const result = await this.matcher.run({ canvasCourse, course, date, target, transcript: text, windowOnly: false, mode, replace: false, offerAutoAccept: true, onStatus: (m) => notice.setMessage(m) });
 			notice.hide();
 			if (result.attached.length) new Notice(`Attached: ${result.attached.join(", ")}`, 6000);
 			else if (!result.skipped && result.candidates === 0) new Notice("No slide files found in that Canvas course.", 6000);
@@ -749,7 +749,7 @@ export default class LectureCompanionPlugin extends Plugin {
 					if (probe === 0) continue;
 					const target = await this.ensureLectureNote(course, date);
 					const transcript = (await this.vault.readSection(target, SECTION_TRANSCRIPT)) ?? "";
-					const result = await this.matcher.run({ canvasCourse, course, date, target, transcript, windowOnly: true, mode: this.settings.slideMatching, replace: false, onStatus: (m) => notice.setMessage(m) });
+					const result = await this.matcher.run({ canvasCourse, course, date, target, transcript, windowOnly: true, mode: this.settings.slideMatching, replace: false, offerAutoAccept: true, onStatus: (m) => notice.setMessage(m) });
 					attached.push(...result.attached.map((n) => `${n} (${course})`));
 					errors.push(...result.errors);
 				}
