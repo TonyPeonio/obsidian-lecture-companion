@@ -149,7 +149,9 @@ Click the microphone in the ribbon or run **Lecture Companion: Open panel**.
    checked. Confirm, and the deck is embedded under *Slides* with its text in a folded
    callout, so the summary can use them. Press **Attach and stop asking** in the picker (or set
    *Match slides to the lecture* to *Automatic*) to skip the picker from then on whenever one
-   deck clearly wins; it still appears when the match is unclear. *Off* never matches.
+   deck clearly wins; it still appears when the match is unclear. **Always take the best match**
+   (setting *Always*) never asks and attaches the top-ranked deck even when the ranking is close,
+   which is handy when splitting an old note into many lectures. *Off* never matches.
    - **Choose slides for this lecture note** re-runs the picker on any lecture note and
      replaces its Slides section (then run *Summarize this lecture note*).
    - **Pull today's Canvas slides** / the **download** button fetch files changed in the

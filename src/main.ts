@@ -14,7 +14,7 @@ import { parseExtraArgs, WhisperServerManager, type ServerConfig, type ServerSta
 import { defaultThreads, nodeLocateDeps, nodeServerDeps } from "./node/deps";
 import { convertPptxToPdf, findPptxConverter, type PptxConverter } from "./node/convert";
 import { cleanTranscript, LectureSession } from "./session";
-import { addCourseAlias, addMeeting, courseNoteOverride, DEFAULT_SETTINGS, manualCourseList, meetingList, vaultCourseName, type LectureCompanionSettings } from "./settings";
+import { addCourseAlias, addMeeting, courseNoteOverride, DEFAULT_SETTINGS, manualCourseList, meetingList, vaultCourseName, type LectureCompanionSettings, type SlideMatching } from "./settings";
 import { LectureCompanionSettingTab } from "./settings-tab";
 import { VaultIO, type NoteTarget } from "./vault";
 import { LectureView, VIEW_TYPE } from "./view";
@@ -545,7 +545,7 @@ export default class LectureCompanionPlugin extends Plugin {
 	}
 
 	/** Matches a deck against `text` (transcript or the student's notes) when the Slides section is still empty. */
-	async matchSlides(course: string, date: string, target: NoteTarget, text: string, mode: "ask" | "auto"): Promise<void> {
+	async matchSlides(course: string, date: string, target: NoteTarget, text: string, mode: Exclude<SlideMatching, "off">): Promise<void> {
 		if (!this.canvas.configured || this.isMeeting(course)) return;
 		const existing = cleanTranscript((await this.vault.readSection(target, SECTION_SLIDES)) ?? "", false);
 		if (existing) return; // slides already chosen for this lecture

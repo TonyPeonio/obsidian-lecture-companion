@@ -1,7 +1,12 @@
 export type NoteMode = "per-lecture" | "per-course-section";
 export type ThinkingMode = "auto" | "on" | "off";
-/** ask = show the picker; auto = attach without asking when the match is clear; off = never match. */
-export type SlideMatching = "ask" | "auto" | "off";
+/** ask = show the picker; auto = attach without asking when the match is clear; always = attach the top match without asking; off = never match. */
+export type SlideMatching = "ask" | "auto" | "always" | "off";
+
+/** Normalizes a dropdown value (or anything from settings data) to a slide-matching mode; unknown values mean "ask". */
+export function parseSlideMatching(v: unknown): SlideMatching {
+	return v === "auto" || v === "always" || v === "off" ? v : "ask";
+}
 
 export interface LectureCompanionSettings {
 	// Whisper

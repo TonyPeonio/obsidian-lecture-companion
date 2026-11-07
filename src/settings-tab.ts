@@ -3,7 +3,7 @@ import { downloadModel, findModel, formatBytes, isModelInstalled, modelUrl, VAD_
 import { installHint, locateWhisperServer } from "./core/whisper/locate";
 import type LectureCompanionPlugin from "./main";
 import { MicRecorder } from "./recorder";
-import { DEFAULT_SETTINGS, setCourseAlias, vaultCourseName } from "./settings";
+import { DEFAULT_SETTINGS, setCourseAlias, vaultCourseName, parseSlideMatching } from "./settings";
 import { INSTALL_SCRIPT_WINDOWS, installerArgs, type WhisperBuild } from "./core/whisper/installer";
 import { cpuCount, defaultThreads, detectGpu, nodeDownloadDeps, nodeLocateDeps, runWindowsInstaller } from "./node/deps";
 
@@ -407,15 +407,16 @@ export class LectureCompanionSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Match slides to the lecture")
-			.setDesc("When a recording stops, rank the course's files by overlap with the transcript and by how much they look like a deck (worksheets and syllabi rank low). Ask: show the picker. Auto: attach without asking when one deck clearly wins (the picker's \"Attach and stop asking\" button sets this). Off: never.")
+			.setDesc("When a recording stops, rank the course's files by overlap with the transcript and by how much they look like a deck (worksheets and syllabi rank low). Ask: show the picker. Auto: attach without asking when one deck clearly wins, else ask. Always: attach the top-ranked deck without asking, even when the ranking is close. Off: never. The picker's \"stop asking\" buttons set Auto or Always.")
 			.addDropdown((d) =>
 				d
 					.addOption("ask", "Ask (show the picker)")
 					.addOption("auto", "Automatic when the match is clear")
+					.addOption("always", "Always take the best match")
 					.addOption("off", "Off")
 					.setValue(s.slideMatching)
 					.onChange(async (v) => {
-						s.slideMatching = v === "auto" ? "auto" : v === "off" ? "off" : "ask";
+						s.slideMatching = parseSlideMatching(v);
 						await save();
 					}),
 			);

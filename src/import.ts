@@ -1,4 +1,5 @@
 // Converting notes taken by hand into lecture notes: the text goes under "My notes", the deck
+import { parseSlideMatching, type SlideMatching } from "./settings";
 // is matched against it, and the summary is written from notes + slide text.
 
 import { type App, Modal, Notice, TFile, TFolder } from "obsidian";
@@ -14,7 +15,7 @@ export interface ImportOptions {
 	text: string;
 	/** Source note, when the import comes from a file; upgraded in place when it already sits at the lecture path. */
 	sourcePath?: string;
-	matchSlides: "ask" | "auto" | "off";
+	matchSlides: SlideMatching;
 	summarize: boolean;
 	/** Add the name to the meeting list first (no Canvas, meeting layout and summary). */
 	meeting?: boolean;
@@ -102,7 +103,7 @@ export async function listImportableNotes(plugin: LectureCompanionPlugin, folder
 export interface ImportChoice {
 	course: string;
 	date: string;
-	matchSlides: "ask" | "auto" | "off";
+	matchSlides: SlideMatching;
 	summarize: boolean;
 	meeting: boolean;
 }
@@ -176,7 +177,8 @@ export class ImportModal extends Modal {
 		const slides = form.createEl("select");
 		for (const [v, label] of [
 			["ask", "Match against my notes and ask"],
-			["auto", "Match automatically"],
+			["auto", "Match automatically when one deck clearly wins"],
+			["always", "Always attach the best match, never ask"],
 			["off", "Do not look for slides"],
 		] as const) {
 			slides.createEl("option", { text: label, attr: { value: v } });
@@ -201,7 +203,7 @@ export class ImportModal extends Modal {
 			this.finish({
 				course: course.value.trim(),
 				date: date?.value || this.defaults.date || toISODate(),
-				matchSlides: meeting.checked ? "off" : slides.value === "auto" ? "auto" : slides.value === "off" ? "off" : "ask",
+				matchSlides: meeting.checked ? "off" : parseSlideMatching(slides.value),
 				summarize: summarize.checked,
 				meeting: meeting.checked,
 			});

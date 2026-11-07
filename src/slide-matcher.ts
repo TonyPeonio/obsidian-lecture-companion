@@ -10,6 +10,7 @@ import { isConfident, rankSlides, type RankedSlide, type SlideCandidate } from "
 import { addDays, safeFileName, SECTION_SLIDES, slidesToMarkdown, startOfDay, type SlideAttachment } from "./core/notes";
 import type LectureCompanionPlugin from "./main";
 import { cleanTranscript } from "./session";
+import type { SlideMatching } from "./settings";
 import type { NoteTarget } from "./vault";
 import { SlidePickerModal } from "./slide-picker";
 
@@ -37,11 +38,11 @@ export interface MatchRequest {
 	transcript: string;
 	/** Only files changed in the look-back window (the dated pull) instead of the whole course. */
 	windowOnly: boolean;
-	/** "ask" shows the picker; "auto" skips it when the top match is clear (or, without a transcript, attaches the pre-selected ones). */
-	mode: "ask" | "auto";
+	/** "ask" shows the picker; "auto" skips it when the top match is clear (or, without a transcript, attaches the pre-selected ones); "always" attaches the top match, however narrow its lead. */
+	mode: Exclude<SlideMatching, "off">;
 	/** Replace the Slides section instead of appending to it. */
 	replace: boolean;
-	/** Offer "Attach and stop asking" in the picker, which switches the slide-matching setting to "auto". */
+	/** Offer the "stop asking" buttons in the picker, which switch the slide-matching setting to "auto" or "always". */
 	offerAutoAccept?: boolean;
 	onStatus?(message: string): void;
 }
@@ -70,12 +71,14 @@ export class SlideMatcher {
 		const hasTranscript = transcript.length > 0;
 
 		let chosen: RankedSlide[];
-		if (req.mode === "auto" && (hasTranscript ? isConfident(ranked) : true)) {
+		if (req.mode === "always") {
+			chosen = ranked.slice(0, 1);
+		} else if (req.mode === "auto" && (hasTranscript ? isConfident(ranked) : true)) {
 			chosen = hasTranscript ? ranked.slice(0, 1) : ranked.filter((r) => r.selected);
 		} else {
 			const onAutoAccept = req.offerAutoAccept
-				? async () => {
-						this.plugin.settings.slideMatching = "auto";
+				? async (mode: "auto" | "always") => {
+						this.plugin.settings.slideMatching = mode;
 						await this.plugin.saveSettings();
 					}
 				: undefined;

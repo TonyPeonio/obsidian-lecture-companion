@@ -12,8 +12,8 @@ export class SlidePickerModal extends Modal {
 		private date: string,
 		private ranked: RankedSlide[],
 		private hasTranscript: boolean,
-		/** When given, the picker offers "Attach and stop asking": attaches the selection and calls this to switch matching to automatic. */
-		private onAutoAccept?: () => Promise<void>,
+		/** When given, the picker offers "stop asking" buttons: they attach the selection and call this to switch matching to "auto" (only when one deck clearly wins) or "always" (top match, no questions). */
+		private onAutoAccept?: (mode: "auto" | "always") => Promise<void>,
 	) {
 		super(app);
 	}
@@ -37,7 +37,7 @@ export class SlidePickerModal extends Modal {
 		if (this.onAutoAccept) {
 			this.contentEl.createEl("p", {
 				cls: "lc-picker-hint",
-				text: "Usually right? Attach and stop asking also switches Match slides to the lecture to Automatic: from then on the best match is attached without this dialog whenever one deck clearly wins.",
+				text: "Usually right? \"Attach and stop asking\" switches Match slides to the lecture to Automatic (no dialog whenever one deck clearly wins). \"Always take the best match\" never asks again and attaches the top-ranked deck even when the ranking is close. Both can be changed back in settings.",
 			});
 		}
 		const list = this.contentEl.createDiv({ cls: "lc-picker-list" });
@@ -60,14 +60,18 @@ export class SlidePickerModal extends Modal {
 		const attach = buttons.createEl("button", { text: "Attach selected", cls: "mod-cta" });
 		attach.addEventListener("click", () => this.finish(this.selected()));
 		if (this.onAutoAccept) {
-			const auto = buttons.createEl("button", { text: "Attach and stop asking" });
-			auto.addEventListener("click", () => {
-				auto.disabled = true;
-				void this.onAutoAccept?.()
-					.then(() => new Notice("Slides are now attached automatically when one deck clearly wins. Change this under Settings → Canvas → Match slides to the lecture.", 8000))
-					.catch((err: unknown) => new Notice(`Could not save the setting: ${(err as Error).message}`, 8000))
-					.finally(() => this.finish(this.selected()));
-			});
+			const stop = (mode: "auto" | "always", label: string, done: string) => {
+				const btn = buttons.createEl("button", { text: label });
+				btn.addEventListener("click", () => {
+					btn.disabled = true;
+					void this.onAutoAccept?.(mode)
+						.then(() => new Notice(`${done} Change this under Settings → Canvas → Match slides to the lecture.`, 8000))
+						.catch((err: unknown) => new Notice(`Could not save the setting: ${(err as Error).message}`, 8000))
+						.finally(() => this.finish(this.selected()));
+				});
+			};
+			stop("auto", "Attach and stop asking", "Slides are now attached automatically when one deck clearly wins.");
+			stop("always", "Always take the best match", "The top-ranked deck is now attached without asking.");
 		}
 		buttons.createEl("button", { text: "Select all" }).addEventListener("click", () => this.checks.forEach((c) => (c.checked = true)));
 		buttons.createEl("button", { text: "None" }).addEventListener("click", () => this.checks.forEach((c) => (c.checked = false)));

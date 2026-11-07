@@ -2,10 +2,11 @@ import { type App, Modal, Notice } from "obsidian";
 import type { NoteEntry } from "./core/split";
 import { meetingCheckbox } from "./import";
 import type LectureCompanionPlugin from "./main";
+import { parseSlideMatching, type SlideMatching } from "./settings";
 
 export interface SplitChoice {
 	course: string;
-	matchSlides: "ask" | "auto" | "off";
+	matchSlides: SlideMatching;
 	summarize: boolean;
 	meeting: boolean;
 	/** Entries with their (possibly edited) dates; only included ones. */
@@ -51,7 +52,8 @@ export class SplitModal extends Modal {
 		form.createEl("label", { text: "Slides" });
 		const slides = form.createEl("select");
 		for (const [v, label] of [
-			["auto", "Match automatically (recommended for many entries)"],
+			["auto", "Match automatically when one deck clearly wins, else ask"],
+			["always", "Always attach the best match, never ask (recommended for many entries)"],
 			["ask", "Match and ask for each lecture"],
 			["off", "Do not look for slides"],
 		] as const) {
@@ -110,7 +112,7 @@ export class SplitModal extends Modal {
 			}
 			this.finish({
 				course: course.value.trim(),
-				matchSlides: meeting.checked ? "off" : slides.value === "ask" ? "ask" : slides.value === "off" ? "off" : "auto",
+				matchSlides: meeting.checked ? "off" : parseSlideMatching(slides.value),
 				summarize: summarize.checked,
 				meeting: meeting.checked,
 				entries: chosen,
