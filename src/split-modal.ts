@@ -59,7 +59,7 @@ export class SplitModal extends Modal {
 		] as const) {
 			slides.createEl("option", { text: label, attr: { value: v } });
 		}
-		slides.value = "auto";
+		slides.value = this.plugin.settings.slideMatching;
 		const meeting = meetingCheckbox(form, course, this.plugin, slides);
 		form.createEl("label", { text: "Summary" });
 		const sumLabel = form.createEl("label", { cls: "lc-import-check" });

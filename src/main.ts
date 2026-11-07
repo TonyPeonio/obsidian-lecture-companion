@@ -559,9 +559,14 @@ export default class LectureCompanionPlugin extends Plugin {
 		await this.matchSlides(course, date, target, transcript, this.settings.slideMatching);
 	}
 
-	/** Matches a deck against `text` (transcript or the student's notes) when the Slides section is still empty. */
-	async matchSlides(course: string, date: string, target: NoteTarget, text: string, mode: Exclude<SlideMatching, "off">): Promise<void> {
+	/**
+	 * Matches a deck against `text` (transcript or the student's notes) when the Slides section is still empty.
+	 * `mode` is what the caller or dialog chose, but "Always" in settings overrides it, so a long import stops
+	 * asking the moment the setting changes (the picker's "Always take the best match" button sets it mid-run).
+	 */
+	async matchSlides(course: string, date: string, target: NoteTarget, text: string, requested: Exclude<SlideMatching, "off">): Promise<void> {
 		if (!this.canvas.configured || this.isMeeting(course)) return;
+		const mode: Exclude<SlideMatching, "off"> = this.settings.slideMatching === "always" ? "always" : requested;
 		const existing = cleanTranscript((await this.vault.readSection(target, SECTION_SLIDES)) ?? "", false);
 		if (existing) return; // slides already chosen for this lecture
 		if (this.courses.length === 0) await this.refreshCourses();
@@ -667,7 +672,7 @@ export default class LectureCompanionPlugin extends Plugin {
 			this.app,
 			this,
 			`Import ${notes.length} note${notes.length === 1 ? "" : "s"} from "${folder.name}"${undated.length ? ` (${undated.length} without a date in the name will use the file's creation date)` : ""}`,
-			{ course: this.courseNames().find((c) => c === folder.name) ?? "", matchSlides: "auto" },
+			{ course: this.courseNames().find((c) => c === folder.name) ?? "", matchSlides: this.settings.slideMatching },
 			false,
 		).ask();
 		if (!choice) return;
