@@ -5,7 +5,8 @@ import { INSTALL_SCRIPT_WINDOWS, installerArgs } from "../src/core/whisper/insta
 
 describe("installer", () => {
 	it("embeds exactly the script that ships in scripts/", () => {
-		const onDisk = readFileSync(path.join(__dirname, "..", "scripts", "install-whisper-windows.ps1"), "utf8");
+		// Git checks the script out with CRLF on Windows; the embedded copy is LF either way.
+		const onDisk = readFileSync(path.join(__dirname, "..", "scripts", "install-whisper-windows.ps1"), "utf8").replace(/\r\n/g, "\n");
 		expect(INSTALL_SCRIPT_WINDOWS).toBe(onDisk);
 	});
 
