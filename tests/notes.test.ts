@@ -28,7 +28,7 @@ import {
 	upsertSection,
 } from "../src/core/notes";
 import { buildSummaryMessages, fitToContext, stripThinkTags } from "../src/core/summarize";
-import { addCourseAlias, addMeeting, courseNoteOverride, DEFAULT_SETTINGS, meetingList, parseCourseNotes, parseKeyValueLines, setCourseAlias, vaultCourseName } from "../src/settings";
+import { addCourseAlias, addMeeting, courseNoteOverride, DEFAULT_SETTINGS, hiddenCourseIds, meetingList, parseCourseNotes, parseKeyValueLines, setCourseAlias, setCourseHidden, vaultCourseName, visibleCourses } from "../src/settings";
 
 describe("one-sentence summaries in the course note", () => {
 	it("takes the In one sentence section, else the first key point or overview sentence", () => {
@@ -271,11 +271,15 @@ describe("settings helpers", () => {
 		expect(vaultCourseName(s, canvas)).toBe(canvas.name);
 		expect(vaultCourseName(s, { id: 1, name: "No Code" })).toBe("No Code");
 		expect(addCourseAlias(s, canvas, canvas.name)).toBe(false);
-		expect(addCourseAlias(s, canvas, "csci-578-a")).toBe(false);
+		expect(addCourseAlias(s, canvas, canvas.name.toLowerCase())).toBe(false);
 		expect(addCourseAlias(s, canvas, "CSCI578")).toBe(true);
 		expect(s.courseAliases).toBe("777 = CSCI578");
 		expect(addCourseAlias(s, canvas, "Other")).toBe(false);
 		expect(vaultCourseName(s, canvas)).toBe("CSCI578");
+		// The course code is a real preference: notes typed as "CSCI-578-A" must keep filing there.
+		const byCode = { ...DEFAULT_SETTINGS, courseAliases: "" };
+		expect(addCourseAlias(byCode, canvas, "csci-578-a")).toBe(true);
+		expect(vaultCourseName(byCode, canvas)).toBe("csci-578-a");
 		expect(parseKeyValueLines("# c\nA = b\nbad\n = x\n")).toEqual([{ key: "a", value: "b" }]);
 	});
 });
@@ -291,7 +295,28 @@ describe("setCourseAlias", () => {
 		expect(s.courseAliases).toBe("111 = Algo");
 		expect(vaultCourseName(s, bio)).toBe(bio.name);
 		setCourseAlias(s, bio, "csci-578-a");
+		expect(s.courseAliases).toBe("111 = Algo\n777 = csci-578-a");
+		setCourseAlias(s, bio, "fall 2026 bioinformatics");
 		expect(s.courseAliases).toBe("111 = Algo");
+	});
+});
+
+describe("hidden courses", () => {
+	it("hides and shows courses by Canvas id and filters a course list", () => {
+		const s = { ...DEFAULT_SETTINGS, hiddenCourses: "" };
+		const courses = [
+			{ id: 1, name: "Intro CS", courseCode: "CS101" },
+			{ id: 2, name: "Department shell", courseCode: "DEPT" },
+		];
+		expect(setCourseHidden(s, 2, true)).toBe(true);
+		expect(setCourseHidden(s, 2, true)).toBe(false);
+		expect([...hiddenCourseIds(s)]).toEqual([2]);
+		expect(visibleCourses(s, courses).map((c) => c.id)).toEqual([1]);
+		expect(setCourseHidden(s, 1, true)).toBe(true);
+		expect(s.hiddenCourses).toBe("1\n2");
+		expect(setCourseHidden(s, 2, false)).toBe(true);
+		expect(visibleCourses(s, courses).map((c) => c.id)).toEqual([2]);
+		expect(hiddenCourseIds({ ...s, hiddenCourses: " 7 \nabc\n\n8" }).size).toBe(2);
 	});
 });
 

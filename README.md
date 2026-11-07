@@ -269,9 +269,16 @@ a **remote whisper-server URL**, no process is started and that server is used i
   course's full Canvas title ("Fall 2026 BIOINFORMATICS (CSCI-578-A, …)"). To use a short name
   instead, either:
   1. type it in the panel's course box when you record or import (if it matches a Canvas course,
-     the pairing is saved for you), or
+     the pairing is saved for you, also when what you typed is the course code), or
   2. go to Settings → Lecture Companion → *Course names in the vault* → **Load courses**, and type
      the name you want next to each Canvas course (leave blank to keep the Canvas title).
+
+  The course box then lists each Canvas course under its vault name, so a renamed course appears
+  once, not as both the Canvas title and the short name.
+- **Hiding courses** — enrolled in something you will never record (a department shell, a
+  section you were added to by mistake)? Under *Course names in the vault*, press the eye
+  button next to it. The course leaves the course list, is never matched to a typed name, and
+  is skipped by the daily pull; press the eye again to bring it back.
 
   Change a name later and new notes follow it; existing folders are not renamed (rename them in
   Obsidian's file explorer, which updates the links). The raw list underneath holds the same

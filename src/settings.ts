@@ -47,6 +47,8 @@ export interface LectureCompanionSettings {
 	keepPptx: boolean;
 	/** One per line: `canvas course id, name or code = name used in the vault`. Learned automatically from the course picker. */
 	courseAliases: string;
+	/** Canvas course ids, one per line, left out of the course list, matching and the daily pull (courses you are enrolled in but never record). */
+	hiddenCourses: string;
 	courseFolder: string;
 	/** One per line: `course id or name = path/to/note.md` */
 	courseNotes: string;
@@ -93,6 +95,7 @@ export const DEFAULT_SETTINGS: LectureCompanionSettings = {
 	convertPptxToPdf: true,
 	keepPptx: false,
 	courseAliases: "",
+	hiddenCourses: "",
 	courseFolder: "Courses",
 	courseNotes: "",
 	dateHeading: "## {{date}}",
@@ -168,15 +171,15 @@ export function vaultCourseName(settings: LectureCompanionSettings, course: { id
 export function addCourseAlias(settings: LectureCompanionSettings, course: { id: number; name: string; courseCode?: string }, alias: string): boolean {
 	const keys = [String(course.id), course.name, course.courseCode ?? ""].filter(Boolean).map((k) => k.toLowerCase());
 	const wanted = alias.trim();
-	// Typing Canvas's own name or code carries no preference; only a different name is worth remembering.
-	if (!wanted || keys.includes(wanted.toLowerCase())) return false;
+	// Typing Canvas's own full name carries no preference; anything else (a short name, the course code) is worth remembering.
+	if (!wanted || wanted.toLowerCase() === course.name.toLowerCase()) return false;
 	if (parseKeyValueLines(settings.courseAliases).some((e) => keys.includes(e.key))) return false;
 	const line = `${course.id} = ${wanted}`;
 	settings.courseAliases = settings.courseAliases.trim() ? `${settings.courseAliases.trim()}\n${line}` : line;
 	return true;
 }
 
-/** Sets (or clears, when `alias` is empty or equals Canvas's own name/code) the vault name for a course. */
+/** Sets (or clears, when `alias` is empty or equals Canvas's own full name) the vault name for a course. */
 export function setCourseAlias(settings: LectureCompanionSettings, course: { id: number; name: string; courseCode?: string }, alias: string): void {
 	const keys = [String(course.id), course.name, course.courseCode ?? ""].filter(Boolean).map((k) => k.toLowerCase());
 	const kept = settings.courseAliases
@@ -187,8 +190,34 @@ export function setCourseAlias(settings: LectureCompanionSettings, course: { id:
 		})
 		.filter((line) => line.trim().length > 0);
 	const wanted = alias.trim();
-	if (wanted && !keys.includes(wanted.toLowerCase())) kept.push(`${course.id} = ${wanted}`);
+	if (wanted && wanted.toLowerCase() !== course.name.toLowerCase()) kept.push(`${course.id} = ${wanted}`);
 	settings.courseAliases = kept.join("\n");
+}
+
+/** Canvas ids of the courses the user hid. */
+export function hiddenCourseIds(settings: LectureCompanionSettings): Set<number> {
+	const ids = new Set<number>();
+	for (const raw of settings.hiddenCourses.split("\n")) {
+		const n = Number(raw.trim());
+		if (raw.trim() && Number.isInteger(n)) ids.add(n);
+	}
+	return ids;
+}
+
+/** Hides or shows a Canvas course. Returns true when settings changed. */
+export function setCourseHidden(settings: LectureCompanionSettings, id: number, hidden: boolean): boolean {
+	const ids = hiddenCourseIds(settings);
+	if (hidden === ids.has(id)) return false;
+	if (hidden) ids.add(id);
+	else ids.delete(id);
+	settings.hiddenCourses = [...ids].sort((a, b) => a - b).join("\n");
+	return true;
+}
+
+/** The courses that are not hidden, in the given order. */
+export function visibleCourses<T extends { id: number }>(settings: LectureCompanionSettings, courses: T[]): T[] {
+	const hidden = hiddenCourseIds(settings);
+	return courses.filter((c) => !hidden.has(c.id));
 }
 
 export function manualCourseList(settings: LectureCompanionSettings): string[] {

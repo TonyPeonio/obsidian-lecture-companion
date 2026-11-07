@@ -14,7 +14,7 @@ import { parseExtraArgs, WhisperServerManager, type ServerConfig, type ServerSta
 import { defaultThreads, nodeLocateDeps, nodeServerDeps } from "./node/deps";
 import { convertPptxToPdf, findPptxConverter, type PptxConverter } from "./node/convert";
 import { cleanTranscript, LectureSession } from "./session";
-import { addCourseAlias, addMeeting, courseNoteOverride, DEFAULT_SETTINGS, manualCourseList, meetingList, vaultCourseName, type LectureCompanionSettings, type SlideMatching } from "./settings";
+import { addCourseAlias, addMeeting, courseNoteOverride, DEFAULT_SETTINGS, manualCourseList, meetingList, vaultCourseName, type LectureCompanionSettings, type SlideMatching, setCourseHidden, visibleCourses } from "./settings";
 import { LectureCompanionSettingTab } from "./settings-tab";
 import { VaultIO, type NoteTarget } from "./vault";
 import { LectureView, VIEW_TYPE } from "./view";
@@ -30,8 +30,10 @@ export default class LectureCompanionPlugin extends Plugin {
 	matcher!: SlideMatcher;
 	modelsDir = "";
 	private converterPromise?: Promise<PptxConverter | null>;
-	/** Active Canvas courses, loaded on demand (`refreshCourses`). */
+	/** Active Canvas courses minus the hidden ones, loaded on demand (`refreshCourses`). Everything else works from this list. */
 	courses: CanvasCourse[] = [];
+	/** Every active Canvas course, hidden ones included (for the settings tab). */
+	allCourses: CanvasCourse[] = [];
 	private serverListeners = new Set<(state: ServerState) => void>();
 
 	async onload(): Promise<void> {
@@ -299,17 +301,30 @@ export default class LectureCompanionPlugin extends Plugin {
 	// ------------------------------------------------------------------ courses
 
 	async refreshCourses(): Promise<CanvasCourse[]> {
-		this.courses = await this.canvas.listCourses();
+		this.allCourses = await this.canvas.listCourses();
+		this.applyHiddenCourses();
+		return this.courses;
+	}
+
+	/** Hides a Canvas course from the course list, matching and the daily pull (or shows it again). */
+	async setCourseHidden(id: number, hidden: boolean): Promise<void> {
+		if (!setCourseHidden(this.settings, id, hidden)) return;
+		await this.saveSettings();
+		this.applyHiddenCourses();
+	}
+
+	private applyHiddenCourses(): void {
+		this.courses = visibleCourses(this.settings, this.allCourses);
 		for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) {
 			const view = leaf.view;
 			if (view instanceof LectureView) view.refreshCourses();
 		}
-		return this.courses;
 	}
 
+	/** Names for the course box: Canvas courses under their vault name (alias), typed courses, existing folders and meeting series. */
 	courseNames(): string[] {
 		const names = new Set<string>();
-		for (const c of this.courses) names.add(c.name);
+		for (const c of this.courses) names.add(vaultCourseName(this.settings, c));
 		for (const c of manualCourseList(this.settings)) names.add(c);
 		for (const c of this.vault.coursesInFolder(this.settings.courseFolder)) names.add(c);
 		for (const m of meetingList(this.settings)) names.add(m);
@@ -367,7 +382,7 @@ export default class LectureCompanionPlugin extends Plugin {
 	noteTargetFor(course: string, date: string): NoteTarget {
 		const s = this.settings;
 		if (s.noteMode === "per-course-section") {
-			const canvasCourse = this.courses.find((c) => c.name === course);
+			const canvasCourse = this.canvasCourseFor(course);
 			const override = courseNoteOverride(s, canvasCourse ?? { name: course });
 			return { path: override ?? courseNotePath(this.folderFor(course), course), parentHeading: dateHeading(s.dateHeading, date) };
 		}

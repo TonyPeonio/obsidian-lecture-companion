@@ -286,6 +286,10 @@
 	padding-bottom: var(--size-2-2);
 }
 
+.lc-alias-row-hidden .setting-item-info {
+	opacity: 0.55;
+}
+
 /* Paste box */
 .lc-paste-modal {
 	width: min(760px, 94vw);

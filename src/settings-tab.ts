@@ -3,7 +3,7 @@ import { downloadModel, findModel, formatBytes, isModelInstalled, modelUrl, VAD_
 import { installHint, locateWhisperServer } from "./core/whisper/locate";
 import type LectureCompanionPlugin from "./main";
 import { MicRecorder } from "./recorder";
-import { DEFAULT_SETTINGS, setCourseAlias, vaultCourseName, parseSlideMatching } from "./settings";
+import { DEFAULT_SETTINGS, setCourseAlias, vaultCourseName, parseSlideMatching, hiddenCourseIds } from "./settings";
 import { INSTALL_SCRIPT_WINDOWS, installerArgs, type WhisperBuild } from "./core/whisper/installer";
 import { cpuCount, defaultThreads, detectGpu, nodeDownloadDeps, nodeLocateDeps, runWindowsInstaller } from "./node/deps";
 
@@ -448,7 +448,7 @@ export class LectureCompanionSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Course names in the vault")
-			.setDesc("Notes are filed under these names (Courses/<name>/…). By default a course uses its full Canvas title; type a shorter name here, e.g. CSCI578. Whatever you type in the panel's course box is remembered here automatically.")
+			.setDesc("Notes are filed under these names (Courses/<name>/…). By default a course uses its full Canvas title; type a shorter name here, e.g. CSCI578. Whatever you type in the panel's course box is remembered here automatically. The eye button hides a course you never record (wrong enrollment, a department shell): it leaves the course list, is never matched, and is skipped by the daily pull.")
 			.addButton((b) =>
 				b.setButtonText("Load courses").onClick(async () => {
 					try {
@@ -462,25 +462,40 @@ export class LectureCompanionSettingTab extends PluginSettingTab {
 		const aliasRows = containerEl.createDiv({ cls: "lc-alias-rows" });
 		const renderAliasRows = (): void => {
 			aliasRows.empty();
-			const courses = this.plugin.courses;
+			const courses = this.plugin.allCourses;
 			if (courses.length === 0) {
 				aliasRows.createDiv({ cls: "lc-setting-result", text: s.canvasUrl && s.canvasToken ? 'Click "Load courses" to list your Canvas courses.' : "Set the Canvas URL and token first." });
 				return;
 			}
+			const hidden = hiddenCourseIds(s);
 			for (const course of courses) {
-				const row = new Setting(aliasRows).setName(course.name).setDesc(`${course.courseCode}${course.term ? ` · ${course.term}` : ""} · Canvas id ${course.id}`);
+				const isHidden = hidden.has(course.id);
+				const row = new Setting(aliasRows).setName(course.name).setDesc(`${course.courseCode}${course.term ? ` · ${course.term}` : ""} · Canvas id ${course.id}${isHidden ? " · hidden" : ""}`);
 				row.settingEl.addClass("lc-alias-row");
+				if (isHidden) row.settingEl.addClass("lc-alias-row-hidden");
 				row.addText((t) => {
 					const current = vaultCourseName(s, course);
-					t.setPlaceholder(course.name).setValue(current === course.name ? "" : current).onChange(async (v) => {
-						setCourseAlias(s, course, v);
-						await save();
-					});
+					t.setPlaceholder(course.name)
+						.setValue(current === course.name ? "" : current)
+						.setDisabled(isHidden)
+						.onChange(async (v) => {
+							setCourseAlias(s, course, v);
+							await save();
+						});
 				});
+				row.addExtraButton((b) =>
+					b
+						.setIcon(isHidden ? "eye" : "eye-off")
+						.setTooltip(isHidden ? "Show this course again" : "Hide this course from the course list, matching and the daily pull")
+						.onClick(async () => {
+							await this.plugin.setCourseHidden(course.id, !isHidden);
+							renderAliasRows();
+						}),
+				);
 			}
 		};
 		renderAliasRows();
-		if (s.canvasUrl && s.canvasToken && this.plugin.courses.length === 0) {
+		if (s.canvasUrl && s.canvasToken && this.plugin.allCourses.length === 0) {
 			void this.plugin.refreshCourses().then(renderAliasRows).catch(() => undefined);
 		}
 
