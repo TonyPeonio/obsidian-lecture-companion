@@ -251,6 +251,23 @@ describe("summaries", () => {
 		expect(transcript[0]?.content).toContain("[mm:ss]");
 		expect(transcript[1]?.content).toContain("## Transcript");
 	});
+
+	it("demands exact timestamps on every claim, transcript-only content and sentence case", () => {
+		for (const kind of ["lecture", "meeting"] as const) {
+			const system = buildSummaryMessages({ course: "c", date: "d", transcript: "t", kind }, 8192)[0]?.content ?? "";
+			expect(system).toMatch(/Every .* ends with the timestamp of the transcript paragraph it comes from, in the form \[mm:ss\], copied exactly/);
+			expect(system).toContain("Never invent, round or interpolate a timestamp");
+			expect(system).toContain("in sentence case");
+			expect(system).toMatch(/include nothing that was not said in it|Include nothing that is not in the transcript/);
+		}
+		const lecture = buildSummaryMessages({ course: "c", date: "d", transcript: "t" }, 8192)[0]?.content ?? "";
+		expect(lecture).toContain("do not summarize slides the lecturer did not discuss");
+		expect(lecture).toContain("never cite slides");
+		const notes = buildSummaryMessages({ course: "c", date: "d", transcript: "n", source: "notes" }, 8192)[0]?.content ?? "";
+		expect(notes).toContain("in sentence case");
+		expect(notes).toContain("Do not invent content that is not in the notes or the slides.");
+		expect(notes).not.toContain("timestamp of the transcript");
+	});
 });
 
 describe("settings helpers", () => {
