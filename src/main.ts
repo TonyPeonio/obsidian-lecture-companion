@@ -66,8 +66,8 @@ export default class LectureCompanionPlugin extends Plugin {
 		this.ollama = new OllamaClient(
 			() => this.settings.ollamaUrl,
 			(input, init) => fetch(input, init),
-			async (url, body) => {
-				const res = await requestUrl({ url, method: "POST", body: body || undefined, contentType: "application/json", throw: false });
+			async (url, method, body) => {
+				const res = await requestUrl({ url, method, body, contentType: body === undefined ? undefined : "application/json", throw: false });
 				return { status: res.status, text: res.text };
 			},
 		);

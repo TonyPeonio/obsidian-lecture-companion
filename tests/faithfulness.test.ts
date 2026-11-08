@@ -161,7 +161,7 @@ describe("synthetic fixture notes", () => {
 	it("are two lecture notes whose summaries cite the transcript at 100%", () => {
 		expect(files.length).toBe(2);
 		for (const file of files) {
-			const md = readFileSync(file, "utf8");
+			const md = readFileSync(file, "utf8").replace(/\r\n?/g, "\n");
 			expect(isLectureNote(md)).toBe(true);
 			const sections = lectureSectionsOf(md);
 			expect(sections.length).toBe(1);

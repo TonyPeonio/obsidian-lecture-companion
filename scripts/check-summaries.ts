@@ -84,7 +84,7 @@ function main(): void {
 			process.exit(2);
 		}
 		for (const file of files) {
-			const md = readFileSync(file, "utf8");
+			const md = readFileSync(file, "utf8").replace(/\r\n?/g, "\n");
 			if (!isLectureNote(md)) continue;
 			notes++;
 			const rel = path.relative(folder, file);
