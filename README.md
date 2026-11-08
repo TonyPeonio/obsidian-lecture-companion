@@ -87,14 +87,17 @@ GPU option also adds `-fa` (flash attention) to the server arguments for you.
 
 **Option B — the install script by hand (no package manager needed).** Download
 [`scripts/install-whisper-windows.ps1`](scripts/install-whisper-windows.ps1) from this
-repository, then run it from a **Command Prompt or PowerShell** window:
+repository, then run it from a **PowerShell** window (the default when you open Terminal or
+press Win+X):
 
-```
-powershell -NoProfile -ExecutionPolicy Bypass -File "%USERPROFILE%\Downloads\install-whisper-windows.ps1"
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\Downloads\install-whisper-windows.ps1"
 ```
 
-(In PowerShell, write the path as `"$env:USERPROFILE\Downloads\install-whisper-windows.ps1"`.)
-The script downloads the official `whisper-bin-x64.zip` from the whisper.cpp releases page,
+In a **Command Prompt** (`cmd.exe`) window, write the path as
+`"%USERPROFILE%\Downloads\install-whisper-windows.ps1"` instead. The two shells expand
+variables differently; if you see *"The argument … does not exist"*, you used the other shell's
+form. The script downloads the official `whisper-bin-x64.zip` from the whisper.cpp releases page,
 checks its SHA-256, and unpacks it to `%LOCALAPPDATA%\whisper.cpp`. The last lines print
 `Installed: …\whisper-server.exe` and the program's usage text. Read the script first if you
 like: it is 30 lines.
@@ -115,9 +118,11 @@ it detects the GPU; with the script, pass `-Cuda` (it downloads the 650 MB
 `whisper-bin-win-cuda-12.4.0-x64.zip`, which bundles the CUDA runtime; any NVIDIA driver from
 2024 or later works):
 
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\Downloads\install-whisper-windows.ps1" -Cuda
 ```
-powershell -NoProfile -ExecutionPolicy Bypass -File "%USERPROFILE%\Downloads\install-whisper-windows.ps1" -Cuda
-```
+
+(`"%USERPROFILE%\Downloads\install-whisper-windows.ps1"` in a Command Prompt window.)
 
 Then add `-fa` under *Extra whisper-server arguments* in the plugin settings (flash attention,
 faster on GPUs). If you had the CPU build installed through Scoop, also clear the *whisper-server
