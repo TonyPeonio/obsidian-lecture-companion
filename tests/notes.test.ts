@@ -27,7 +27,7 @@ import {
 	upsertNestedSection,
 	upsertSection,
 } from "../src/core/notes";
-import { buildSummaryMessages, fitToContext, stripThinkTags } from "../src/core/summarize";
+import { buildSummaryMessages, capSlideText, fitToContext, MIN_TRANSCRIPT_CHARS, MIN_TRANSCRIPT_SEC, SLIDE_TEXT_FLOOR_CHARS, SLIDE_TEXT_RATIO, stripThinkTags, tooShortToSummarize, transcriptLength } from "../src/core/summarize";
 import { addCourseAlias, addMeeting, courseNoteOverride, DEFAULT_SETTINGS, hiddenCourseIds, meetingList, parseCourseNotes, parseKeyValueLines, setCourseAlias, setCourseHidden, vaultCourseName, visibleCourses } from "../src/settings";
 
 describe("one-sentence summaries in the course note", () => {
@@ -250,6 +250,63 @@ describe("summaries", () => {
 		const transcript = buildSummaryMessages({ course: "c", date: "d", transcript: "t" }, 8192);
 		expect(transcript[0]?.content).toContain("[mm:ss]");
 		expect(transcript[1]?.content).toContain("## Transcript");
+	});
+
+	const page = (n: number, text: string): string => `--- Page ${n} ---\n${text}`;
+	const deck = [
+		page(1, "NP completeness. Reporting to the boss."),
+		page(2, "Polynomial versus exponential time. Table of running times."),
+		page(3, "Clause gadget: three vertices per clause connected in a triangle; two per triangle in the cover."),
+		page(4, "Satisfiability. Clauses and literals. Truth assignment."),
+		page(5, "Input encodings: adjacency matrices, edge lists."),
+	].join("\n");
+	const speech = "**[0:00]** For each clause we create three new vertices, one per literal, connected in a triangle. At least two vertices per triangle must be in the cover.";
+
+	it("measures speech from the paragraph markers and decides when a transcript is too short", () => {
+		expect(transcriptLength("![[rec.webm]]\n\n_Nothing was transcribed._")).toEqual({ seconds: 0, chars: 0 });
+		const twenty = transcriptLength(speech);
+		expect(twenty.chars).toBe(speech.length - "**[0:00]** ".length);
+		expect(twenty.seconds).toBeLessThan(MIN_TRANSCRIPT_SEC);
+		expect(tooShortToSummarize(speech)).toBe(`Transcript too short to summarize (${Math.round(twenty.seconds)} s); slides alone would be summarized instead.`);
+		// Long enough in seconds but not in characters, and the other way round, are both too short.
+		expect(tooShortToSummarize("**[0:00]** a\n\n**[1:00]** b")).toMatch(/^Transcript too short to summarize \(60 s\)/);
+		expect(tooShortToSummarize(`**[0:00]** ${"word ".repeat(80)}`)).toMatch(/too short/);
+		expect(MIN_TRANSCRIPT_CHARS).toBe(300);
+		const long = Array.from({ length: 6 }, (_, i) => `**[${i}:00]** ${"spoken words here ".repeat(5)}`).join("\n\n");
+		expect(tooShortToSummarize(long)).toBeNull();
+	});
+
+	it("caps slide text at max(3000, 3 × transcript), keeping the overlapping slides in document order", () => {
+		expect(SLIDE_TEXT_FLOOR_CHARS).toBe(3000);
+		expect(SLIDE_TEXT_RATIO).toBe(3);
+		expect(capSlideText(deck, speech, 10_000)).toBe(deck);
+		const capped = capSlideText(deck, speech, 200);
+		expect(capped).toContain("--- Page 3 ---");
+		expect(capped).not.toContain("--- Page 5 ---");
+		expect(capped).toMatch(/slides without overlap with the transcript left out\)$/);
+		// Whatever survives stays in deck order.
+		const kept = [...capped.matchAll(/--- Page (\d) ---/g)].map((m) => Number(m[1]));
+		expect(kept).toEqual([...kept].sort((a, b) => a - b));
+		expect(kept).toContain(3);
+		// No markers: paragraphs are the unit, and with nothing to match the first ones are kept.
+		expect(capSlideText("alpha\n\nbeta\n\ngamma", "", 11)).toBe("alpha\nbeta\n(… 1 slides without overlap with the transcript left out)");
+	});
+
+	it("applies the cap in fitToContext for transcripts, not for the student's notes", () => {
+		const bigDeck = Array.from({ length: 60 }, (_, i) => page(i + 1, `Slide ${i + 1} about ${i === 10 ? "triangle vertices in the cover" : "something else entirely"} ${"filler ".repeat(20)}`)).join("\n");
+		expect(bigDeck.length).toBeGreaterThan(SLIDE_TEXT_FLOOR_CHARS);
+		const fitted = fitToContext({ course: "c", date: "d", transcript: speech, slideText: bigDeck }, 32768);
+		expect(fitted.truncated).toBe(true);
+		expect(fitted.slideText.length).toBeLessThanOrEqual(Math.max(SLIDE_TEXT_FLOOR_CHARS, SLIDE_TEXT_RATIO * speech.length) + 80);
+		expect(fitted.slideText).toContain("--- Page 11 ---");
+		expect(fitted.transcript).toBe(speech);
+		// A transcript three times longer than the deck: nothing is cut.
+		const smallDeck = page(1, "triangle vertices");
+		expect(fitToContext({ course: "c", date: "d", transcript: speech, slideText: smallDeck }, 32768)).toEqual({ transcript: speech, slideText: smallDeck, truncated: false });
+		// Student notes keep the whole deck (the slides are the fuller source there).
+		const notes = fitToContext({ course: "c", date: "d", transcript: "- terse", slideText: bigDeck, source: "notes" }, 32768);
+		expect(notes.slideText.startsWith(page(1, "Slide 1"))).toBe(true);
+		expect(notes.slideText).toContain("--- Page 60 ---");
 	});
 
 	it("demands exact timestamps on every claim, transcript-only content and sentence case", () => {

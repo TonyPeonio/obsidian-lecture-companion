@@ -1,4 +1,24 @@
+import { tfidfSimilarities } from "./match";
 import type { ChatMessage, OllamaClient } from "./ollama";
+
+/**
+ * A transcript with less speech than this is not summarized: with 20 seconds of speech and
+ * twenty pages of slide text the model summarizes the slides and the summary stops being a
+ * record of the lecture. Both limits must be met; seconds are estimated from the paragraph
+ * markers (see `transcriptLength`).
+ */
+export const MIN_TRANSCRIPT_SEC = 45;
+export const MIN_TRANSCRIPT_CHARS = 300;
+/**
+ * Slide text handed to the model is capped at max(SLIDE_TEXT_FLOOR_CHARS, SLIDE_TEXT_RATIO ×
+ * transcript characters), keeping the slides whose terms overlap the transcript, so the slides
+ * support the transcript instead of replacing it. Not applied when summarizing the student's
+ * own notes, where the slides are the fuller source.
+ */
+export const SLIDE_TEXT_FLOOR_CHARS = 3000;
+export const SLIDE_TEXT_RATIO = 3;
+/** Speaking rate used to estimate how long the last transcript paragraph lasted (chars per second). */
+const CHARS_PER_SECOND = 15;
 
 export interface SummaryInput {
 	course: string;
@@ -82,12 +102,75 @@ One checkbox per task someone agreed to do, in the form "- [ ] **Owner** — tas
 Things left unresolved or to follow up on. Omit the section if there are none.`;
 }
 
-/** Rough budget so transcript + slides fit the context window (4 chars ≈ 1 token, with headroom). */
+/**
+ * How much speech a markdown transcript holds: characters of spoken text (markers and audio
+ * embeds removed) and an estimate of seconds, the last paragraph's start plus its length at
+ * `CHARS_PER_SECOND` (paragraph markers give start times only).
+ */
+export function transcriptLength(transcript: string): { seconds: number; chars: number } {
+	let chars = 0;
+	let lastStart = 0;
+	let lastChars = 0;
+	for (const raw of transcript.split("\n")) {
+		const line = raw.trim();
+		if (!line || /^!\[\[[^\]]*\]\]$/.test(line) || /^_[^_]*_$/.test(line)) continue;
+		const m = /^(?:\*\*)?\[(\d{1,2}):(\d{2})(?::(\d{2}))?\](?:\*\*)?\s*(.*)$/.exec(line);
+		const text = m ? (m[4] ?? "") : line;
+		if (m) {
+			const [a, b, c] = [Number(m[1]), Number(m[2]), m[3] === undefined ? null : Number(m[3])];
+			lastStart = c === null ? a * 60 + b : a * 3600 + b * 60 + c;
+			lastChars = 0;
+		}
+		chars += text.length;
+		lastChars += text.length;
+	}
+	return { seconds: lastStart + lastChars / CHARS_PER_SECOND, chars };
+}
+
+/** Why a transcript is too short to summarize (see MIN_TRANSCRIPT_SEC), or null when it is long enough. */
+export function tooShortToSummarize(transcript: string): string | null {
+	const { seconds, chars } = transcriptLength(transcript);
+	if (seconds >= MIN_TRANSCRIPT_SEC && chars >= MIN_TRANSCRIPT_CHARS) return null;
+	return `Transcript too short to summarize (${Math.round(seconds)} s); slides alone would be summarized instead.`;
+}
+
+/**
+ * Caps slide text at `maxChars`, keeping whole slides (`--- Page n ---` / `--- Slide n ---`
+ * blocks, else paragraphs) in order of TF-IDF overlap with the transcript, then restoring
+ * document order. Returns the text unchanged when it fits.
+ */
+export function capSlideText(slideText: string, transcript: string, maxChars: number): string {
+	const text = slideText.trim();
+	if (text.length <= maxChars) return text;
+	const blocks = text.split(/\n(?=--- (?:Page|Slide) \d+ ---)/).flatMap((b) => (b.includes("--- ") ? [b] : b.split(/\n{2,}/))).map((b) => b.trim()).filter(Boolean);
+	const scores = tfidfSimilarities(transcript, blocks);
+	const order = blocks.map((_, i) => i).sort((a, b) => (scores[b] ?? 0) - (scores[a] ?? 0) || a - b);
+	const keep = new Set<number>();
+	let used = 0;
+	for (const i of order) {
+		const len = (blocks[i] ?? "").length + 1;
+		if (used + len > maxChars) continue;
+		keep.add(i);
+		used += len;
+	}
+	const kept = blocks.filter((_, i) => keep.has(i));
+	return `${kept.join("\n")}${kept.length < blocks.length ? `\n(… ${blocks.length - kept.length} slides without overlap with the transcript left out)` : ""}`;
+}
+
+/**
+ * Rough budget so transcript + slides fit the context window (4 chars ≈ 1 token, with headroom).
+ * For a transcript (not notes) the slide text is first capped relative to the transcript (SLIDE_TEXT_RATIO).
+ */
 export function fitToContext(input: SummaryInput, numCtx: number): { transcript: string; slideText: string; truncated: boolean } {
 	const budgetChars = Math.max(4000, Math.floor(numCtx * 3.2) - 2500);
 	let slideText = input.slideText?.trim() ?? "";
 	let transcript = input.transcript.trim();
 	let truncated = false;
+	if (input.source !== "notes" && slideText) {
+		const capped = capSlideText(slideText, transcript, Math.max(SLIDE_TEXT_FLOOR_CHARS, SLIDE_TEXT_RATIO * transcript.length));
+		if (capped !== slideText) truncated = true;
+		slideText = capped;
+	}
 	const slideBudget = Math.min(slideText.length, Math.floor(budgetChars * 0.3));
 	if (slideText.length > slideBudget) {
 		slideText = `${slideText.slice(0, slideBudget)}\n(… slide text truncated)`;

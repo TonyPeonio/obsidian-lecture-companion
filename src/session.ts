@@ -6,7 +6,7 @@ import { Chunker } from "./core/audio/chunker";
 import { TranscriptionPipeline, type PipelineProgress, type TranscriptSegment } from "./core/audio/pipeline";
 import { generateFlashcards, renderFlashcards, SECTION_FLASHCARDS, type FlashcardInput } from "./core/flashcards";
 import { extractTodos, safeFileName, sectionBody, SECTION_MY_NOTES, SECTION_SLIDES, SECTION_SUMMARY, SECTION_TRANSCRIPT, toISODate, transcriptToMarkdown } from "./core/notes";
-import { summarizeLecture } from "./core/summarize";
+import { summarizeLecture, tooShortToSummarize } from "./core/summarize";
 import { transcribeWav } from "./core/whisper/client";
 import type LectureCompanionPlugin from "./main";
 import { MicRecorder, TARGET_RATE } from "./recorder";
@@ -365,6 +365,14 @@ export class LectureSession {
 			const slideText = cleanTranscript((await this.plugin.vault.readSection(target, SECTION_SLIDES)) ?? "", false);
 			if (!transcript.trim()) {
 				throw new Error("Nothing to summarize: the Transcript and My notes sections are empty. Record the lecture or paste your notes under My notes first.");
+			}
+			// A few seconds of speech next to pages of slide text would become a summary of the slides.
+			const tooShort = source === "transcript" ? tooShortToSummarize(transcript) : null;
+			if (tooShort) {
+				new Notice(tooShort, 8000);
+				this.status = "done";
+				this.emit();
+				return "";
 			}
 			const settings = this.plugin.settings;
 			// The live session's course, else whatever the note itself says (the command runs on any open note).

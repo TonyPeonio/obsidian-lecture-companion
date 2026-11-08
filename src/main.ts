@@ -232,7 +232,7 @@ export default class LectureCompanionPlugin extends Plugin {
 				if (!checking) {
 					const target = this.targetForExistingNote(file.path);
 					this.session.summarize(target).then(
-						() => new Notice("Summary written."),
+						(text) => (text ? new Notice("Summary written.") : undefined),
 						(err: Error) => new Notice(`Summary failed: ${err.message}`, 8000),
 					);
 					void this.activateView();
