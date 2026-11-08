@@ -337,6 +337,7 @@ npm install
 npm run dev     # watch build → main.js
 npm test        # unit tests (vitest): chunker, pipeline, whisper client/server manager, Canvas, extractors, notes
 npm run build   # type-check + Obsidian review lint + production bundle
+npm run check-summaries -- <vault folder>   # faithfulness: does every [mm:ss] a summary cites point at a transcript paragraph within 20 s that shares a content word? Prints precision per note; fails below 90%
 ```
 
 `src/core/` has no Obsidian or Node imports; process control, HTTP, file system and pdf.js are
