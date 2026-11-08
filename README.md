@@ -31,8 +31,10 @@ summaries through [Ollama](https://ollama.com).
   note reviews itself. Re-summarizing replaces the section; questions the transcript does not
   answer get no card.
 
-Pairs well with [Local Vault Agent](https://github.com/TonyPeonio/obsidian-local-vault-agent),
-which can search and compile across the notes this plugin writes.
+Lecture Companion is one of a suite of Obsidian plugins by the same author, all at
+[github.com/TonyPeonio](https://github.com/TonyPeonio): [Local Vault Agent](https://github.com/TonyPeonio/obsidian-local-vault-agent)
+(a local model that searches and compiles across your notes, including the ones this plugin writes),
+Canvas Companion, Exam Companion and Paper Companion. Each works on its own.
 
 ## Requirements
 
