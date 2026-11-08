@@ -9,7 +9,8 @@ import { extractTodos, safeFileName, sectionBody, SECTION_MY_NOTES, SECTION_SLID
 import { summarizeLecture, tooShortToSummarize } from "./core/summarize";
 import { transcribeWav } from "./core/whisper/client";
 import type LectureCompanionPlugin from "./main";
-import { MicRecorder, TARGET_RATE } from "./recorder";
+import { explainCaptureError, parseAudioSource } from "./core/audio/sources";
+import { desktopPlatform, MicRecorder, TARGET_RATE } from "./recorder";
 import type { NoteTarget } from "./vault";
 
 export type SessionStatus = "idle" | "starting" | "recording" | "paused" | "transcribing" | "finishing" | "matching" | "summarizing" | "done" | "error";
@@ -125,7 +126,7 @@ export class LectureSession {
 				maxChunkSec: Math.max(5, settings.chunkSeconds),
 				silenceCutMs: Math.max(200, settings.silenceCutMs),
 			});
-			await this.recorder.start(settings.inputDeviceId, settings.keepAudio, {
+			await this.recorder.start({ source: parseAudioSource(settings.audioSource), deviceId: settings.inputDeviceId, keepAudio: settings.keepAudio, platform: desktopPlatform() }, {
 				onFrame: (pcm) => {
 					const chunker = this.chunker;
 					const pipeline = this.pipeline;
@@ -156,9 +157,9 @@ export class LectureSession {
 			await this.recorder.stop().catch(() => null);
 			this.clearTimers();
 			this.status = "error";
-			this.error = (err as Error).message;
+			this.error = explainCaptureError(err, parseAudioSource(this.plugin.settings.audioSource), desktopPlatform());
 			this.emit();
-			throw err;
+			throw new Error(this.error);
 		}
 	}
 

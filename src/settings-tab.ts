@@ -2,7 +2,8 @@ import { type App, Modal, Notice, PluginSettingTab, Setting } from "obsidian";
 import { downloadModel, findModel, formatBytes, isModelInstalled, modelUrl, VAD_MODEL, WHISPER_MODELS, type ModelEntry } from "./core/whisper/models";
 import { installHint, locateWhisperServer } from "./core/whisper/locate";
 import type LectureCompanionPlugin from "./main";
-import { MicRecorder } from "./recorder";
+import { desktopCapturer, desktopPlatform, MicRecorder } from "./recorder";
+import { AUDIO_SOURCE_LABELS, AUDIO_SOURCES, parseAudioSource, systemAudioUnavailable } from "./core/audio/sources";
 import { DEFAULT_SETTINGS, setCourseAlias, vaultCourseName, parseSlideMatching, hiddenCourseIds } from "./settings";
 import { INSTALL_SCRIPT_WINDOWS, installerArgs, type WhisperBuild } from "./core/whisper/installer";
 import { cpuCount, defaultThreads, detectGpu, nodeDownloadDeps, nodeLocateDeps, runWindowsInstaller } from "./node/deps";
@@ -211,7 +212,27 @@ export class LectureCompanionSettingTab extends PluginSettingTab {
 		// -------------------------------------------------------------- Recording
 		new Setting(containerEl).setName("Recording").setHeading();
 
-		const micSetting = new Setting(containerEl).setName("Microphone").setDesc("Which input to record. Default uses the system default device.");
+		const sourceSetting = new Setting(containerEl)
+			.setName("Audio source")
+			.setDesc("Microphone for a lecture in the room. \"This computer's audio\" records what the computer plays (a Zoom or Teams lecture, a YouTube video) without a microphone; \"Both\" mixes the two for a hybrid class.");
+		const sourceNote = sourceSetting.descEl.createDiv({ cls: "lc-setting-note" });
+		const describeSource = (): void => {
+			const source = parseAudioSource(s.audioSource);
+			const why = source === "microphone" ? undefined : systemAudioUnavailable(desktopPlatform(), desktopCapturer() !== undefined);
+			sourceNote.setText(why ?? (source === "microphone" ? "" : "Mute notification sounds while recording: everything the computer plays is transcribed."));
+		};
+		sourceSetting.addDropdown((d) => {
+			for (const key of AUDIO_SOURCES) d.addOption(key, AUDIO_SOURCE_LABELS[key]);
+			d.setValue(parseAudioSource(s.audioSource));
+			d.onChange(async (v) => {
+				s.audioSource = parseAudioSource(v);
+				describeSource();
+				await save();
+			});
+		});
+		describeSource();
+
+		const micSetting = new Setting(containerEl).setName("Microphone").setDesc("Which input to record for the Microphone and Both sources. Default uses the system default device. A loopback device (Stereo Mix, VB-Cable, BlackHole, a PulseAudio monitor) listed here records the computer's output on any platform.");
 		micSetting.addDropdown((d) => {
 			d.addOption("", "System default");
 			d.setValue(s.inputDeviceId);

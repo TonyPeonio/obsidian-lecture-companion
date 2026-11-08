@@ -1,3 +1,4 @@
+import type { AudioSource } from "./core/audio/sources";
 export type NoteMode = "per-lecture" | "per-course-section";
 export type ThinkingMode = "auto" | "on" | "off";
 /** ask = show the picker; auto = attach without asking when the match is clear; always = attach the top match without asking; off = never match. */
@@ -30,6 +31,8 @@ export interface LectureCompanionSettings {
 	attachmentFolder: string;
 	chunkSeconds: number;
 	silenceCutMs: number;
+	/** Microphone, the computer's own output (a Zoom, Teams or YouTube lecture), or both mixed. */
+	audioSource: AudioSource;
 	inputDeviceId: string;
 	/** Stop automatically after this long. 0 = never. */
 	maxRecordingMinutes: number;
@@ -89,6 +92,7 @@ export const DEFAULT_SETTINGS: LectureCompanionSettings = {
 	attachmentFolder: "{{notefolder}}/attachments",
 	chunkSeconds: 20,
 	silenceCutMs: 700,
+	audioSource: "microphone",
 	inputDeviceId: "",
 	maxRecordingMinutes: 180,
 	autoStopSilenceMinutes: 15,

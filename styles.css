@@ -331,3 +331,11 @@
 	font-size: var(--font-ui-smaller);
 	white-space: pre-wrap;
 }
+
+.lc-setting-note {
+	margin-top: 4px;
+	color: var(--text-muted);
+}
+.lc-setting-note:empty {
+	display: none;
+}

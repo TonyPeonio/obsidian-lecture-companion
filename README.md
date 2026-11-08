@@ -50,8 +50,9 @@ properties as a rooted family tree). All at [github.com/TonyPeonio](https://gith
 
 ## Requirements
 
-Desktop Obsidian (Windows, macOS or Linux). The plugin uses the microphone, starts a local
-process and reads files, which mobile Obsidian does not allow.
+Desktop Obsidian (Windows, macOS or Linux). The plugin uses the microphone (or the computer's own
+audio output, see *Remote and recorded lectures*), starts a local process and reads files, which
+mobile Obsidian does not allow.
 
 1. **whisper.cpp** — the `whisper-server` binary. The plugin does not download it (Obsidian's
    developer policy forbids plugins installing their own dependencies); it finds it on your
@@ -153,6 +154,20 @@ Settings → Lecture Companion → **Detect** should say `Found: <path>`. Then *
 ## Usage
 
 Click the microphone in the ribbon or run **Lecture Companion: Open panel**.
+
+### Remote and recorded lectures
+
+A lecture that plays on the computer (Zoom, Teams, a YouTube video, a recording in the browser)
+needs no microphone: set **Settings → Recording → Audio source** to *This computer's audio*. The
+plugin records what the computer plays through Chromium's desktop capture, so headphones are fine
+and nothing in the room is picked up. *Both* mixes the microphone in for a hybrid class. Mute
+notification sounds while recording, since everything the computer plays is transcribed.
+
+This works on Windows and Linux. macOS does not let an app record its own output, so there you
+install a free virtual audio device such as [BlackHole](https://existential.audio/blackhole/),
+route the output through it (a Multi-Output Device keeps your speakers working) and pick it under
+*Microphone*. The same trick (Windows *Stereo Mix* or VB-Cable, a PulseAudio monitor on Linux)
+works anywhere the desktop capture is not available, and the plugin names the fix when it is not.
 
 1. Type or pick the course, check the date, press **record**. The first start loads the model
    (10–30 s for large models); the status pill turns green when Whisper is ready.
@@ -257,7 +272,8 @@ inside the meeting folder counts as a meeting series. The import dialogs (*paste
 
 ### How transcription works
 
-The microphone is captured at 16 kHz mono by an AudioWorklet. A chunker cuts the stream at
+The audio source (microphone, the computer's output through Chromium's desktop capture, or the
+two mixed in a GainNode) is captured at 16 kHz mono by an AudioWorklet. A chunker cuts the stream at
 pauses of about 0.7 s (never before 4 s, never after 20 s by default) and sends each chunk as
 a WAV file to `whisper-server`'s `/inference` endpoint, passing the tail of the transcript so
 far as the prompt so sentences stay coherent across chunks. Segments come back with
@@ -321,7 +337,10 @@ a **remote whisper-server URL**, no process is started and that server is used i
 | Server stays on *Loading model…* for a long time | Large models take 10–60 s to load from a slow disk the first time; the plugin waits up to two minutes. A smaller model (`large-v3-turbo-q8_0`, `small`) loads faster. |
 | Record button does nothing / *"Could not start: Permission denied"* | Obsidian was refused microphone access. Windows: Settings → Privacy & security → Microphone → allow desktop apps. macOS: System Settings → Privacy & Security → Microphone → Obsidian. |
 | Transcript falls further and further behind | The CPU cannot keep up with the model. Use `large-v3-turbo-q8_0` or `small`, make sure *Threads* is 0 (all cores), and close other heavy programs. The bar turns orange when the lag passes a minute. |
-| Transcript is empty while the mic level moves | Wrong microphone selected (Settings → Recording → Microphone), or the language setting does not match the lecture (`auto` detects it). |
+| Transcript is empty while the audio level moves | Wrong microphone selected (Settings → Recording → Microphone), or the language setting does not match the lecture (`auto` detects it). |
+| *"This computer's audio"* fails with *"macOS does not let apps record…"* | Chromium cannot capture system audio on macOS. Install [BlackHole](https://existential.audio/blackhole/) (free), make a Multi-Output Device with it and your speakers, pick BlackHole under *Microphone* and set the source back to *Microphone*. |
+| *"This computer's audio"* fails with *"…does not expose the desktop capturer"* or *"no audio track"* | Pick a loopback device under *Microphone* instead: Windows *Stereo Mix* (enable it under Sound → Recording devices) or VB-Cable; Linux the PulseAudio/PipeWire *Monitor of …* device. |
+| Zoom or Teams audio is transcribed but your own voice is not | The source is *This computer's audio*, which hears only what the computer plays. Choose *Both* to add the microphone. |
 | Summary fails with *"Cannot reach Ollama"* | Ollama is not running (`ollama serve`), or the URL points to another machine that is not reachable. Click **Test** next to the Ollama URL. |
 | Summary fails with *"Model … is not installed"* | The model in Settings → Summaries is not pulled on that Ollama. Run the command in the message, e.g. `ollama pull qwen3.5:9b`, or pick one of the models **Test** lists. |
 | Pull says *unauthorized* / *no permission* for a course | The course hides its Files tab from students. The plugin then falls back to files attached to Modules and files linked from the course's Pages (e.g. a "slides" link on a weekly page), which are readable when published. Slides posted only in Announcements are not collected yet. |

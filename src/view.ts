@@ -93,7 +93,7 @@ export class LectureView extends ItemView {
 		this.serverPill = status.createSpan({ cls: "lc-pill" });
 		this.statusText = status.createSpan({ cls: "lc-status-text" });
 		const meterRow = root.createDiv({ cls: "lc-meter-row" });
-		meterRow.createSpan({ text: "Mic", cls: "lc-label" });
+		meterRow.createSpan({ text: "Audio", cls: "lc-label" });
 		this.levelMeter = meterRow.createEl("progress", { cls: "lc-level", attr: { max: "1", value: "0" } });
 		const progressRow = root.createDiv({ cls: "lc-progress-row" });
 		this.progressBar = progressRow.createEl("progress", { cls: "lc-progress", attr: { max: "1", value: "0" } });
