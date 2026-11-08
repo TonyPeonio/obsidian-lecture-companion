@@ -1,6 +1,21 @@
 import type { AudioChunk } from "./chunker";
 import { encodeWav } from "./wav";
 
+/**
+ * whisper.cpp refuses audio shorter than one second ("input is too short"), and the chunk flushed
+ * when a recording stops can be a fraction of a second. Such a chunk is padded with trailing
+ * silence to this length before it is sent.
+ */
+export const MIN_AUDIO_SEC = 1.2;
+
+export function padToMinimum(pcm: Float32Array, sampleRate: number, minSec = MIN_AUDIO_SEC): Float32Array {
+	const need = Math.ceil(minSec * sampleRate);
+	if (pcm.length >= need) return pcm;
+	const out = new Float32Array(need);
+	out.set(pcm);
+	return out;
+}
+
 export interface TranscriptSegment {
 	/** Seconds from the start of the recording. */
 	start: number;
@@ -132,7 +147,7 @@ export class TranscriptionPipeline {
 
 	private async process(chunk: AudioChunk): Promise<void> {
 		if (!chunk.silent) {
-			const wav = encodeWav(chunk.pcm, this.opts.sampleRate);
+			const wav = encodeWav(padToMinimum(chunk.pcm, this.opts.sampleRate), this.opts.sampleRate);
 			const tail = this.text().slice(-this.opts.promptChars);
 			const prompt = tail.length > 0 ? tail : undefined;
 			let attempt = 0;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Chunker } from "../src/core/audio/chunker";
-import { isNoiseMarker, normalizeSegments, TranscriptionPipeline, type TranscribeResult } from "../src/core/audio/pipeline";
+import { isNoiseMarker, MIN_AUDIO_SEC, normalizeSegments, padToMinimum, TranscriptionPipeline, type TranscribeResult } from "../src/core/audio/pipeline";
 import { concatFloat32, encodeWav, resample, rms } from "../src/core/audio/wav";
 
 const RATE = 16000;
@@ -159,6 +159,23 @@ describe("TranscriptionPipeline", () => {
 		expect(attempts).toBe(2);
 		expect(errors).toEqual(["boom"]);
 		expect(pipeline.progress.transcribedSec).toBe(0.5);
+	});
+
+	it("pads a chunk shorter than whisper's one-second minimum with silence, and keeps its timeline", async () => {
+		const bytes: number[] = [];
+		const pipeline = new TranscriptionPipeline(async (wav) => {
+			bytes.push(wav.byteLength);
+			return { text: "bye.", segments: [{ start: 0, end: 0.4, text: "bye." }] };
+		});
+		pipeline.enqueue({ pcm: tone(0.4), startSec: 30, endSec: 30.4, silent: false });
+		pipeline.enqueue({ pcm: tone(2), startSec: 30.4, endSec: 32.4, silent: false });
+		await pipeline.drain();
+		expect(bytes[0]).toBe(44 + Math.ceil(MIN_AUDIO_SEC * RATE) * 2);
+		expect(bytes[1]).toBe(44 + 2 * RATE * 2);
+		expect(pipeline.segments[0]).toMatchObject({ start: 30, end: 30.4, text: "bye." });
+		expect(padToMinimum(tone(3), RATE)).toHaveLength(3 * RATE);
+		const padded = padToMinimum(new Float32Array([0.5, 0.5]), 10, 1);
+		expect(Array.from(padded)).toEqual([0.5, 0.5, 0, 0, 0, 0, 0, 0, 0, 0]);
 	});
 
 	it("drain resolves immediately when idle and setRecorded raises lag", () => {
