@@ -36,10 +36,18 @@ summaries through [Ollama](https://ollama.com).
   the professor say about isolation forests, and when?" by quoting the transcript paragraph
   with its timestamp and linking the note. On by default; nothing happens without an `AGENT.md`.
 
-Lecture Companion is one of a suite of Obsidian plugins by the same author, all at
-[github.com/TonyPeonio](https://github.com/TonyPeonio): [Local Vault Agent](https://github.com/TonyPeonio/obsidian-local-vault-agent)
-(a local model that searches and compiles across your notes, including the ones this plugin writes),
-Canvas Companion, Exam Companion and Paper Companion. Each works on its own.
+Lecture Companion is part of the Companion suite of local-first Obsidian plugins by Tony Peonio for
+students and researchers: your machine does the work, every change is a diff you approve, and the
+numbers are published. The others are Local Vault Agent (local Ollama agent that searches, compiles,
+edits notes), Canvas Companion (Canvas LMS assignments, grades and announcements as notes), Exam
+Companion (day-by-day study plan, daily quizzes and flashcards), Paper Companion (Zotero search by
+meaning, page-cited reading notes), Research Log Companion (append-only lab notebook with git,
+parameters, data hashes), Meeting Companion (local meeting transcription, decisions, action items,
+weekly digest), Job Hunt Companion (job applications as notes, resume tailoring, interview
+questions), Fellowship Companion (grants and fellowships: deadlines, materials, letters,
+eligibility), Code Companion (commits in the daily note, weekly report, TODOs), Teaching Companion
+(local-model rubric grading with verbatim evidence) and Branching Table of Contents (parent/child
+properties as a rooted family tree). All at [github.com/TonyPeonio](https://github.com/TonyPeonio).
 
 ## Requirements
 
