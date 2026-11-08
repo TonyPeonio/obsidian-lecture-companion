@@ -1,6 +1,6 @@
 {
   "name": "lecture-companion",
-  "version": "0.1.16",
+  "version": "0.1.17",
   "description": "Record lectures with live local transcription (whisper.cpp), pull the day's slides from Canvas LMS, and summarize with Ollama — all into your course notes.",
   "main": "main.js",
   "private": true,
