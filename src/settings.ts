@@ -62,6 +62,8 @@ export interface LectureCompanionSettings {
 	numCtx: number;
 	thinking: ThinkingMode;
 	summaryInstructions: string;
+	/** After the summary, answer its review questions from the transcript and write a `## Flashcards` section (Spaced Repetition `Question::Answer` lines). One extra model call per lecture. */
+	flashcards: boolean;
 	// Notes
 	noteMode: NoteMode;
 	/** Course names typed by hand (one per line) for the picker when Canvas is not configured. */
@@ -107,6 +109,7 @@ export const DEFAULT_SETTINGS: LectureCompanionSettings = {
 	numCtx: 32768,
 	thinking: "off",
 	summaryInstructions: "",
+	flashcards: false,
 	noteMode: "per-lecture",
 	manualCourses: "",
 	meetings: "",

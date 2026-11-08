@@ -603,6 +603,16 @@ export class LectureCompanionSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
+			.setName("Flashcards for Spaced Repetition")
+			.setDesc("After the summary, answer its review questions from the transcript (one more model call, thinking off) and write a Flashcards section of Question::Answer lines, tagged #flashcards, for the Spaced Repetition plugin. Re-summarizing replaces the section.")
+			.addToggle((t) =>
+				t.setValue(s.flashcards).onChange(async (v) => {
+					s.flashcards = v;
+					await save();
+				}),
+			);
+
+		new Setting(containerEl)
 			.setName("Extra summary instructions")
 			.setDesc("Appended to the summary prompt, e.g. \"Always list formulas\" or \"Write in German\".")
 			.addTextArea((t) =>

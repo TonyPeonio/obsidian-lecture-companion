@@ -23,6 +23,13 @@ summaries through [Ollama](https://ollama.com).
   each note's first key point; re-summarize a note for a proper one-sentence summary).
 - **Summaries that cite timestamps.** Key points, definitions, formulas, announcements and
   review questions, each pointing back to `[mm:ss]` in the transcript.
+- **Flashcards (opt-in).** Turn on **Flashcards for Spaced Repetition** under Settings →
+  Summaries and each summary is followed by one more model call that answers its review
+  questions from the transcript. The answers are written to a `## Flashcards` section as
+  `Question::Answer` lines under a `#flashcards` tag, the single-line format of the
+  [Spaced Repetition](https://github.com/st3v3nmw/obsidian-spaced-repetition) plugin, so the
+  note reviews itself. Re-summarizing replaces the section; questions the transcript does not
+  answer get no card.
 
 Pairs well with [Local Vault Agent](https://github.com/TonyPeonio/obsidian-local-vault-agent),
 which can search and compile across the notes this plugin writes.

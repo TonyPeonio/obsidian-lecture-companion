@@ -4,6 +4,7 @@
 import { Notice } from "obsidian";
 import { Chunker } from "./core/audio/chunker";
 import { TranscriptionPipeline, type PipelineProgress, type TranscriptSegment } from "./core/audio/pipeline";
+import { generateFlashcards, renderFlashcards, SECTION_FLASHCARDS, type FlashcardInput } from "./core/flashcards";
 import { extractTodos, safeFileName, sectionBody, SECTION_MY_NOTES, SECTION_SLIDES, SECTION_SUMMARY, SECTION_TRANSCRIPT, toISODate, transcriptToMarkdown } from "./core/notes";
 import { summarizeLecture } from "./core/summarize";
 import { transcribeWav } from "./core/whisper/client";
@@ -369,6 +370,7 @@ export class LectureSession {
 			// The live session's course, else whatever the note itself says (the command runs on any open note).
 			const series = meta?.course ?? (target === this.target && this.course ? this.course : await this.plugin.seriesOfNote(target.path));
 			const kind = this.plugin.noteKind(series);
+			const date = meta?.date ?? (target === this.target && this.date ? this.date : (/(\d{4}-\d{2}-\d{2})/.exec(target.parentHeading ?? target.path)?.[1] ?? toISODate()));
 			const text = await summarizeLecture(
 				this.plugin.ollama,
 				{
@@ -379,7 +381,7 @@ export class LectureSession {
 				},
 				{
 					course: series,
-					date: meta?.date ?? (target === this.target && this.date ? this.date : (/(\d{4}-\d{2}-\d{2})/.exec(target.parentHeading ?? target.path)?.[1] ?? toISODate())),
+					date,
 					transcript,
 					source,
 					kind,
@@ -405,6 +407,10 @@ export class LectureSession {
 				const added = await this.plugin.addCourseTodos(series, items);
 				if (added > 0) new Notice(`${added} action item${added === 1 ? "" : "s"} added to the ${series} TODO list.`, 6000);
 			}
+			// Opt-in: answer the review questions from the transcript and write them as Spaced Repetition cards.
+			if (settings.flashcards && kind === "lecture" && text) {
+				await this.writeFlashcards(target, { course: series, date, summary: text, transcript, slideText: slideText || undefined }, settings.ollamaModel, settings.numCtx, this.summaryAbort.signal);
+			}
 			this.status = "done";
 			this.emit();
 			return text;
@@ -421,6 +427,25 @@ export class LectureSession {
 
 	cancelSummary(): void {
 		this.summaryAbort?.abort();
+	}
+
+	/**
+	 * Answers the summary's review questions from the transcript and replaces the `## Flashcards`
+	 * section (never duplicated on a re-run). A failure here is reported but does not fail the summary.
+	 */
+	private async writeFlashcards(target: NoteTarget, input: FlashcardInput, model: string, numCtx: number, signal: AbortSignal): Promise<void> {
+		try {
+			const cards = await generateFlashcards(this.plugin.ollama, { model, numCtx, temperature: 0.2, think: false }, input, signal);
+			if (cards.length === 0) {
+				new Notice("No flashcards: the model could not answer the review questions from the transcript.", 6000);
+				return;
+			}
+			await this.plugin.vault.writeSection(target, SECTION_FLASHCARDS, renderFlashcards(cards), "replace");
+			new Notice(`${cards.length} flashcard${cards.length === 1 ? "" : "s"} written.`, 4000);
+		} catch (err) {
+			if (err instanceof Error && err.name === "AbortError") return;
+			new Notice(`Flashcards failed: ${(err as Error).message}`, 8000);
+		}
 	}
 
 	/** Called by the plugin on unload. */
