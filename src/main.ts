@@ -1,5 +1,6 @@
 import { Modal, Notice, Platform, Plugin, requestUrl, TFile, type App, type WorkspaceLeaf } from "obsidian";
 import { describePull, pullSlides } from "./canvas-pull";
+import { conventionsBlock, upsertConventions } from "./core/agent-bridge";
 import { CanvasClient, resolveCourse, type CanvasCourse } from "./core/canvas";
 import type { HttpRequest } from "./core/http";
 import { addLectureLink, addTodos, courseNotePath, ensureTodoSection, extractTodos, replaceAttachmentRefs, SECTION_MY_NOTES, dateHeading, detectDate, lectureNotePath, migrateCourseIndex, oneLineSummary, renderLectureNote, safeFileName, SECTION_SLIDES, SECTION_SUMMARY, setLectureLinkSummary, SECTION_TRANSCRIPT, stripFrontmatter, toISODate, type NoteKind } from "./core/notes";
@@ -242,8 +243,10 @@ export default class LectureCompanionPlugin extends Plugin {
 		});
 		this.addCommand({ id: "start-whisper-server", name: "Start whisper-server", callback: () => void this.startServer().catch((e: Error) => new Notice(e.message, 8000)) });
 		this.addCommand({ id: "stop-whisper-server", name: "Stop whisper-server", callback: () => this.server.stop() });
+		this.addCommand({ id: "agent-conventions", name: "Add lecture conventions to AGENT.md", callback: () => void this.syncAgentConventions(true) });
 
 		this.app.workspace.onLayoutReady(() => {
+			void this.syncAgentConventions(false);
 			if (this.settings.canvasUrl && this.settings.canvasToken) {
 				void this.refreshCourses().catch(() => undefined);
 				if (this.settings.autoPullDaily && this.settings.lastCanvasPull !== toISODate()) {
@@ -256,6 +259,34 @@ export default class LectureCompanionPlugin extends Plugin {
 	onunload(): void {
 		void this.session.dispose();
 		this.server.stop();
+	}
+
+	/** Appends the conventions block to AGENT.md when the setting is on and the note exists. */
+	async syncAgentConventions(verbose: boolean): Promise<void> {
+		if (!this.settings.agentBridge && !verbose) return;
+		const file = this.vault.file("AGENT.md");
+		if (!file) {
+			if (verbose) new Notice("No AGENT.md in the vault root. Create one with Local Vault Agent (Settings → Conventions note → Create) first.", 8000);
+			return;
+		}
+		const block = conventionsBlock({
+			courseFolder: this.settings.courseFolder,
+			noteMode: this.settings.noteMode,
+			dateHeading: this.settings.dateHeading,
+			meetingFolder: this.settings.meetingFolder,
+		});
+		let changed = false;
+		try {
+			await this.app.vault.process(file, (md) => {
+				const res = upsertConventions(md, block);
+				changed = res.changed;
+				return res.text;
+			});
+		} catch (err) {
+			if (verbose) new Notice(`Could not update AGENT.md: ${(err as Error).message}`, 8000);
+			return;
+		}
+		if (verbose) new Notice(changed ? "Lecture conventions written to AGENT.md." : "AGENT.md already has the current lecture conventions.");
 	}
 
 	// ----------------------------------------------------------------- settings

@@ -68,6 +68,8 @@ export interface LectureCompanionSettings {
 	noteMode: NoteMode;
 	/** Course names typed by hand (one per line) for the picker when Canvas is not configured. */
 	manualCourses: string;
+	/** Append the lecture-note conventions to Local Vault Agent's AGENT.md when it exists. */
+	agentBridge: boolean;
 	// Meetings
 	/** Meeting series (work, club, 1:1s), one name per line: never looked up in Canvas, filed under `meetingFolder`, summarized as meetings. */
 	meetings: string;
@@ -112,6 +114,7 @@ export const DEFAULT_SETTINGS: LectureCompanionSettings = {
 	flashcards: false,
 	noteMode: "per-lecture",
 	manualCourses: "",
+	agentBridge: true,
 	meetings: "",
 	meetingFolder: "Meetings",
 };

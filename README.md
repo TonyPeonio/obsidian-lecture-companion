@@ -30,6 +30,11 @@ summaries through [Ollama](https://ollama.com).
   [Spaced Repetition](https://github.com/st3v3nmw/obsidian-spaced-repetition) plugin, so the
   note reviews itself. Re-summarizing replaces the section; questions the transcript does not
   answer get no card.
+- **Local Vault Agent bridge.** When `AGENT.md` exists in the vault root, a short block
+  describing the lecture note shape (folders, sections, `[mm:ss]` citations, `**[m:ss]**`
+  transcript paragraphs) is appended once, between markers, so the agent can answer "what did
+  the professor say about isolation forests, and when?" by quoting the transcript paragraph
+  with its timestamp and linking the note. On by default; nothing happens without an `AGENT.md`.
 
 Lecture Companion is one of a suite of Obsidian plugins by the same author, all at
 [github.com/TonyPeonio](https://github.com/TonyPeonio): [Local Vault Agent](https://github.com/TonyPeonio/obsidian-local-vault-agent)
@@ -241,6 +246,7 @@ inside the meeting folder counts as a meeting series. The import dialogs (*paste
 | Pull Canvas slides for a date… | Same, for a date you choose |
 | Summarize this lecture note | Re-runs the summary on the open note (Transcript, or My notes when there is no transcript, plus Slides) |
 | Start / Stop whisper-server | Manual control of the local transcription server |
+| Add lecture conventions to AGENT.md | Writes the Local Vault Agent block now (it also happens on startup when the setting is on) |
 
 ### How transcription works
 
@@ -292,6 +298,11 @@ a **remote whisper-server URL**, no process is started and that server is used i
   Change a name later and new notes follow it; existing folders are not renamed (rename them in
   Obsidian's file explorer, which updates the links). The raw list underneath holds the same
   mapping as `canvas id = name` lines, for copying between machines.
+- **Tell Local Vault Agent about lecture notes** — on by default; only does anything when
+  `AGENT.md` exists in the vault root, and never writes outside its
+  `<!-- lecture-companion:start -->` … `<!-- lecture-companion:end -->` markers. The block
+  follows the *Course folder*, *Layout*, *Date heading* and *Meeting folder* settings; press
+  **Update now** (or run *Add lecture conventions to AGENT.md*) after changing them.
 
 ## Troubleshooting
 

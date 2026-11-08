@@ -333,6 +333,18 @@ export class LectureCompanionSettingTab extends PluginSettingTab {
 				}),
 			);
 
+		const bridge = new Setting(containerEl)
+			.setName("Tell Local Vault Agent about lecture notes")
+			.setDesc("When AGENT.md exists in the vault root, append a short block (between markers, once) describing the lecture note shape so the agent can answer \"what did the professor say about X, and when\" with the transcript timestamp and a link.")
+			.addToggle((t) =>
+				t.setValue(s.agentBridge).onChange(async (v) => {
+					s.agentBridge = v;
+					await save();
+					if (v) await this.plugin.syncAgentConventions(true);
+				}),
+			);
+		bridge.addButton((b) => b.setButtonText("Update now").onClick(() => void this.plugin.syncAgentConventions(true)));
+
 		// -------------------------------------------------------------- Meetings
 		new Setting(containerEl).setName("Meetings").setHeading();
 
