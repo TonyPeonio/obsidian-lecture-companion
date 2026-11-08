@@ -132,7 +132,7 @@ describe("TranscriptionPipeline", () => {
 		await pipeline.drain();
 		expect(calls.length).toBe(2); // silent chunk skipped
 		expect(calls[0]?.prompt).toBeUndefined();
-		expect(calls[0]?.bytes).toBe(44 + RATE * 2);
+		expect(calls[0]?.bytes).toBe(44 + Math.ceil(MIN_AUDIO_SEC * RATE) * 2); // a 1 s chunk is padded to whisper's safe minimum
 		expect(calls[1]?.prompt).toBe("hunk 1 text.");
 		expect(pipeline.segments.map((s) => [s.start, s.end, s.text])).toEqual([
 			[0, 1, "chunk 1 text."],
