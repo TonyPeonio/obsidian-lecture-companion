@@ -6,6 +6,9 @@ import { Chunker } from "./core/audio/chunker";
 import { TranscriptionPipeline, type PipelineProgress, type TranscriptSegment } from "./core/audio/pipeline";
 import { generateFlashcards, renderFlashcards, SECTION_FLASHCARDS, type FlashcardInput } from "./core/flashcards";
 import { extractTodos, safeFileName, sectionBody, SECTION_MY_NOTES, SECTION_SLIDES, SECTION_SUMMARY, SECTION_TRANSCRIPT, toISODate, transcriptToMarkdown } from "./core/notes";
+import { buildCatchUpMessages } from "./core/catchup";
+import { recentText, renderTranscript, SLIDE_LINK_TAIL, type MarkKind, type TranscriptMark } from "./core/transcript";
+import { composeWhisperPrompt } from "./core/vocab";
 import { summarizeLecture, tooShortToSummarize } from "./core/summarize";
 import { transcribeWav } from "./core/whisper/client";
 import type LectureCompanionPlugin from "./main";
@@ -27,6 +30,10 @@ export class LectureSession {
 	summary = "";
 	audioPath?: string;
 	readonly segments: TranscriptSegment[] = [];
+	/** ⭐/❓ marks set during this recording (seconds on the recording timeline). */
+	readonly marks: TranscriptMark[] = [];
+	/** Course vocabulary put in front of every whisper prompt (see core/vocab). */
+	vocab: string[] = [];
 
 	/** Why the last recording stopped on its own, if it did. */
 	autoStopReason?: string;
@@ -98,6 +105,8 @@ export class LectureSession {
 		this.autoStopReason = undefined;
 		this.priorTranscript = "";
 		this.segments.length = 0;
+		this.marks.length = 0;
+		this.vocab = [];
 		this.chunker = undefined;
 		this.pipeline = undefined;
 		this.emit();
@@ -120,6 +129,7 @@ export class LectureSession {
 			// A second recording of the same lecture appends instead of wiping the first.
 			this.priorTranscript = cleanTranscript((await this.plugin.vault.readSection(this.target, SECTION_TRANSCRIPT)) ?? "", true);
 			const settings = this.plugin.settings;
+			this.vocab = await this.plugin.courseVocabulary(name, this.target).catch(() => []);
 			this.pipeline = this.makePipeline();
 			this.chunker = new Chunker({
 				sampleRate: TARGET_RATE,
@@ -175,6 +185,32 @@ export class LectureSession {
 		this.recorder.resume();
 		this.status = "recording";
 		this.emit();
+	}
+
+	/** Puts a ⭐ Important / ❓ Confusing mark in the transcript at the current recording time. */
+	mark(kind: MarkKind): TranscriptMark | null {
+		if (this.status !== "recording" && this.status !== "paused") return null;
+		const mark: TranscriptMark = { at: this.recordedSec, kind };
+		this.marks.push(mark);
+		this.emit();
+		return mark;
+	}
+
+	/** "Catch me up": the last `minutes` of the live transcript, summarized by the model. Not written to the note. */
+	async catchUp(minutes: number, onDelta?: (delta: string) => void, signal?: AbortSignal): Promise<string> {
+		const text = recentText(this.segments, Math.max(this.recordedSec, this.progress.transcribedSec), minutes);
+		if (text.length < 40) throw new Error(`Not enough has been transcribed in the last ${minutes} min yet.`);
+		const settings = this.plugin.settings;
+		const out = await this.plugin.ollama.chat({
+			model: settings.ollamaModel,
+			messages: buildCatchUpMessages(this.course, minutes, text),
+			options: { num_ctx: Math.min(settings.numCtx, 8192), temperature: 0.2 },
+			keep_alive: "10m",
+			think: false,
+			signal,
+			onDelta,
+		});
+		return out.replace(/<think>[\s\S]*?<\/think>\s*/g, "").trim();
 	}
 
 	/**
@@ -250,7 +286,7 @@ export class LectureSession {
 			async (wav, { prompt }) => {
 				const baseUrl = await this.plugin.server.ensureRunning();
 				const result = await transcribeWav(this.plugin.http, baseUrl, wav, {
-					prompt,
+					prompt: composeWhisperPrompt(settings.whisperVocabulary ? this.vocab : [], prompt),
 					language: settings.language === "auto" ? undefined : settings.language,
 				});
 				this.plugin.server.touch();
@@ -283,6 +319,9 @@ export class LectureSession {
 			} catch (err) {
 				new Notice(`Slide matching failed: ${(err as Error).message}`, 8000);
 			}
+			if (this.plugin.settings.alignSlides) {
+				await this.plugin.alignSlidesInNote(this.target, false).catch((err: Error) => new Notice(`Linking transcript to slides failed: ${err.message}`, 8000));
+			}
 		}
 		if (this.plugin.settings.summarizeOnStop && this.segments.length > 0) {
 			await this.summarize();
@@ -310,6 +349,7 @@ export class LectureSession {
 			this.target = await this.plugin.ensureLectureNote(name, date);
 			this.priorTranscript = cleanTranscript((await this.plugin.vault.readSection(this.target, SECTION_TRANSCRIPT)) ?? "", true);
 			const settings = this.plugin.settings;
+			this.vocab = await this.plugin.courseVocabulary(name, this.target).catch(() => []);
 			this.pipeline = this.makePipeline();
 			this.chunker = new Chunker({ sampleRate: TARGET_RATE, maxChunkSec: Math.max(5, settings.chunkSeconds), silenceCutMs: Math.max(200, settings.silenceCutMs) });
 			this.status = "transcribing";
@@ -478,7 +518,7 @@ export class LectureSession {
 		const lines: string[] = [];
 		if (this.priorTranscript) lines.push(this.priorTranscript, "");
 		if (this.audioPath) lines.push(`![[${this.audioPath.split("/").pop() ?? this.audioPath}]]`, "");
-		if (this.segments.length > 0) lines.push(transcriptToMarkdown(this.segments));
+		if (this.segments.length > 0 || this.marks.length > 0) lines.push(renderTranscript(this.segments, { marks: this.marks, markQuestions: this.plugin.settings.detectQuestions }));
 		else if (!this.priorTranscript) lines.push("_Nothing was transcribed._");
 		await this.plugin.vault.writeSection(this.target, SECTION_TRANSCRIPT, lines.join("\n"), "replace");
 	}
@@ -510,6 +550,8 @@ export function cleanTranscript(section: string, keepEmbeds: boolean): string {
 			if (!keepEmbeds && /^!\[\[[^\]]*\]\]$/.test(t)) return false;
 			return true;
 		})
+		// Slide links added by alignment are navigation, not lecture content.
+		.map((line) => (keepEmbeds ? line : line.replace(SLIDE_LINK_TAIL, "")))
 		.join("\n")
 		.replace(/\n{3,}/g, "\n\n")
 		.trim();

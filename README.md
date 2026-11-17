@@ -37,6 +37,41 @@ summaries through [Ollama](https://ollama.com).
   [Spaced Repetition](https://github.com/st3v3nmw/obsidian-spaced-repetition) plugin, so the
   note reviews itself. Re-summarizing replaces the section; questions the transcript does not
   answer get no card.
+- **Course vocabulary for Whisper.** Before each chunk, Whisper is told the words of the course:
+  the course name and code, its teachers (from Canvas), distinctive terms from this lecture's
+  slides (or the last lecture's), terms defined in recent summaries, and any words you add in
+  settings. Names and jargon ("Kullback-Leibler", your professor's name) come out spelled right
+  far more often.
+- **Clickable timestamps.** In a lecture note, click a transcript marker `**[12:34]**` or a
+  summary citation `[12:34]` and the recording plays from that moment (reading view and live
+  preview; Alt-click to put the cursor there instead). The embedded player is used when it is on
+  screen, otherwise a small player opens in the corner. The note text is not changed.
+- **Mark moments while recording.** ⭐ *Important* and ❓ *Confusing* buttons in the panel (and
+  commands you can give hotkeys) drop a line like `**[23:10]** ⭐ Important` into the transcript.
+  The summary gives important parts priority and explains confusing parts more thoroughly, with
+  a review question about them.
+- **Catch me up.** Drifted off for a moment? The panel's *Catch me up* button summarizes the
+  last 5 minutes (configurable) of the live transcript in a few bullets and says what the
+  lecturer is on right now. It stays in the panel unless you click *Add to My notes*.
+- **Transcript linked to slides.** After a deck is matched, each transcript paragraph is compared
+  with every slide page, and where the slide changes the paragraph gets a link such as
+  `[[Lecture 5.pdf#page=12|slide 12]]`, so you can jump from what was said to what was shown.
+- **Questions from class.** Short turns that end in a question mark after a pause are marked
+  `**Q:**` in the transcript, and the summary lists them under *Questions from class* with the
+  answer. This is a heuristic, not speaker recognition (see [Limits](#limits-of-the-question-detection)).
+- **Exam review notes.** *Make a review note* gathers a course's lectures in a date range into
+  `Courses/<course>/Review <from>–<to>.md`: each lecture's one-sentence summary and key points,
+  every term and definition, the review questions and the questions from class, each linked back
+  to its lecture, with an overview from the model on top if you want one.
+- **Reminders at class time.** Type your weekly schedule (`Machine Learning = Mon Wed Fri
+  10:00-10:50`) or let the plugin read the Canvas calendar, and two minutes before class it asks
+  "Machine Learning starts in 2 min. Record?". Record fills in the course and date and starts;
+  nothing is recorded without that click.
+- **Works with Local Vault Agent.** *Ask about this lecture* (panel button and command) opens
+  Local Vault Agent's chat about the lecture note, and Lecture Companion exposes an
+  [API](#api-for-other-plugins) that Local Vault Agent uses to list lectures, read transcripts and
+  transcribe voice input with the same whisper-server. Settings → Summaries can copy Local Vault
+  Agent's Ollama URL and model.
 - **Local Vault Agent bridge.** When `AGENT.md` exists in the vault root, a short block
   describing the lecture note shape (folders, sections, `[mm:ss]` citations, `**[m:ss]**`
   transcript paragraphs) is appended once, between markers, so the agent can answer "what did
@@ -278,7 +313,12 @@ inside the meeting folder counts as a meeting series. The import dialogs (*paste
 | Stop recording and write the note | |
 | Pull today's Canvas slides | Fetches today's new PDF/PPTX files from every active course |
 | Pull Canvas slides for a date… | Same, for a date you choose |
-| Rename a course | Renames the course folder and course note, updates `course:` in its notes, keeps links working, and saves the new name for the Canvas course |
+| Rename a course | Renames the course folder and course note, updates `course:` in its notes, renames recordings named after the course (`<course> <date> <time>.webm`) and repoints their embeds, keeps links working, and saves the new name for the Canvas course |
+| Mark this moment as important / as confusing | While recording: adds `**[m:ss]** ⭐ Important` or `❓ Confusing` to the transcript (give them hotkeys in Settings → Hotkeys) |
+| Catch me up | While recording: summarizes the last few minutes in the panel |
+| Link transcript paragraphs to slides in this note | Adds `[[deck.pdf#page=N\|slide N]]` links to the open note's transcript where the slide changes (replaces earlier links) |
+| Make a review note | Pick a course and a date range; writes `Review <from>–<to>.md` in the course folder |
+| Ask about this lecture (Local Vault Agent) | Opens Local Vault Agent's chat about the open lecture note (needs that plugin) |
 | Summarize this lecture note | Re-runs the summary on the open note (Transcript, or My notes when there is no transcript, plus Slides) |
 | Start / Stop whisper-server | Manual control of the local transcription server |
 | Add lecture conventions to AGENT.md | Writes the Local Vault Agent block now (it also happens on startup when the setting is on) |
@@ -288,8 +328,11 @@ inside the meeting folder counts as a meeting series. The import dialogs (*paste
 The audio source (microphone, the computer's output through Chromium's desktop capture, or the
 two mixed in a GainNode) is captured at 16 kHz mono by an AudioWorklet. A chunker cuts the stream at
 pauses of about 0.7 s (never before 4 s, never after 20 s by default) and sends each chunk as
-a WAV file to `whisper-server`'s `/inference` endpoint, passing the tail of the transcript so
-far as the prompt so sentences stay coherent across chunks. Segments come back with
+a WAV file to `whisper-server`'s `/inference` endpoint, passing a prompt: the course vocabulary
+(`Glossary: …`, at most 80 words) followed by the last 200 characters of the transcript so far,
+so terms are spelled right and sentences stay coherent across chunks. Whisper reads at most 224
+prompt tokens and drops the start of a longer prompt, which is why the vocabulary is capped and
+comes first. Segments come back with
 timestamps and are stitched onto the recording's timeline. Whisper's non-speech markers
 (`[BLANK_AUDIO]`, `(music)`) are dropped. The transcript is written to the note every minute
 while recording, so a crash loses at most a minute.
@@ -297,6 +340,44 @@ while recording, so a crash loses at most a minute.
 `whisper-server` is started as `whisper-server -m <model> -t <threads> --host 127.0.0.1
 --port <free port> -l <language>` and stopped after ten idle minutes (configurable). If you set
 a **remote whisper-server URL**, no process is started and that server is used instead.
+
+### Limits of the question detection
+
+There is no speaker recognition. A paragraph is marked `**Q:**` when it is short (3 to 45 words),
+ends with "?", starts after a pause of more than 2.5 s, is not a stock check-in ("Any
+questions?", "Does that make sense?", "Is that clear?") and is followed by another paragraph.
+So a question the lecturer puts to the room can be marked too, a student's question that Whisper
+merges with the answer (no pause between them) is missed, and so is a question the microphone
+barely picked up. The summary is told the marks are a guess and keeps only real questions under
+*Questions from class*. Turn it off under Settings → Recording → *Mark questions from class*.
+
+### API for other plugins
+
+`app.plugins.plugins["lecture-companion"].api` (Local Vault Agent uses it):
+
+```ts
+interface LectureCompanionApi {
+  version: 1;
+  /** Course and meeting-series names (Canvas courses under their vault names, typed courses, folders). */
+  courses(): string[];
+  /** Per-lecture notes `<folder>/<course>/YYYY-MM-DD.md`, oldest first. `sentence` is the
+   *  one-line summary from the Summary section (null until summarized, or while the index is
+   *  still reading the note right after startup). */
+  lectures(course?: string): { path: string; course: string; date: string; kind: "lecture" | "meeting"; sentence: string | null }[];
+  /** Transcript paragraphs, `start` in seconds (from `**[m:ss]**`); marks are left out,
+   *  `**Q:**` prefixes and slide links are stripped from `text`. */
+  transcript(path: string): Promise<{ start: number; text: string }[]>;
+  /** Transcribes a 16 kHz mono WAV file with the plugin's whisper-server (started if needed). */
+  transcribe(wav16kMono: ArrayBuffer): Promise<string>;
+  /** The Ollama URL and model from this plugin's settings. */
+  ollama(): { url: string; model: string };
+}
+```
+
+The "Sections in the course note" layout is not listed by `lectures()`. In the other
+direction, *Ask about this lecture* calls Local Vault Agent's `api.openChatAbout(path)`, and
+*Use Local Vault Agent's Ollama settings* reads its `api.ollama()`; without Local Vault Agent
+the button is hidden and the command says the plugin is needed.
 
 ## Settings worth knowing
 
@@ -334,6 +415,18 @@ a **remote whisper-server URL**, no process is started and that server is used i
   Change a name later and new notes follow it; existing folders are not renamed (rename them in
   Obsidian's file explorer, which updates the links). The raw list underneath holds the same
   mapping as `canvas id = name` lines, for copying between machines.
+- **Course vocabulary** (Whisper section) — on by default. *Extra vocabulary* takes lines like
+  `Machine Learning = Prof. Nguyen, Kullback-Leibler`; a line without `=` applies to every course.
+- **Class reminders** — *Weekly class schedule* takes one class per line, `Course = days
+  start-end`: `Machine Learning = Mon Wed Fri 10:00-10:50`, `Algorithms = TTh 2pm-3:15pm`
+  (`MWF`, `TR`, `Tue/Thu` work too). *Use the Canvas calendar* adds timed events of 20 minutes to
+  4 hours from your courses' Canvas calendars (many courses do not put class meetings there).
+  The prompt shows a couple of minutes before the start (*Ask this many minutes before*), once per
+  class, and not while something is recording.
+- **Link the transcript to the slides** (Canvas section) — on by default; runs after slides are
+  matched or chosen. A paragraph too unlike every slide gets no link, and going back to an
+  earlier slide is allowed but costs more than moving on, so one passing mention does not
+  produce a link to an old slide.
 - **Tell Local Vault Agent about lecture notes** — on by default; only does anything when
   `AGENT.md` exists in the vault root, and never writes outside its
   `<!-- lecture-companion:start -->` … `<!-- lecture-companion:end -->` markers. The block
@@ -366,10 +459,12 @@ a **remote whisper-server URL**, no process is started and that server is used i
 
 This plugin makes network requests only to:
 
-- the **Canvas URL** you configure, with your access token, to list courses and files and
-  download the files you asked for;
+- the **Canvas URL** you configure, with your access token, to list courses (with their
+  teachers' names, for the Whisper vocabulary) and files, download the files you asked for, and,
+  when class reminders use the Canvas calendar, read today's calendar events;
 - **huggingface.co**, only when you click *Download model*, to fetch the Whisper model you chose;
-- the **Ollama URL** you configure, sending the transcript and slide text for summarizing;
+- the **Ollama URL** you configure, sending the transcript and slide text for summarizing (and
+  the last few minutes of the live transcript when you press *Catch me up*);
 - **`127.0.0.1`** (the local `whisper-server` it started) or the **remote whisper-server URL**
   you configure, sending recorded audio for transcription.
 

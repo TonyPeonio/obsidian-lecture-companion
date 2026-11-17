@@ -77,6 +77,25 @@ export interface LectureCompanionSettings {
 	/** Meeting series (work, club, 1:1s), one name per line: never looked up in Canvas, filed under `meetingFolder`, summarized as meetings. */
 	meetings: string;
 	meetingFolder: string;
+	// 0.2.0
+	/** Put a short course vocabulary (names, slide terms, defined terms) in front of each whisper prompt. */
+	whisperVocabulary: boolean;
+	/** Extra words for whisper, one line per course: `Course = Prof. Nguyen, Bayes` (a line without `=` applies to every course). */
+	vocabularyExtra: string;
+	/** After slides are matched, link transcript paragraphs to the slide being discussed. */
+	alignSlides: boolean;
+	/** Mark short questions from the room with **Q:** in the transcript. */
+	detectQuestions: boolean;
+	/** "Catch me up" summarizes this many minutes of the live transcript. */
+	catchUpMinutes: number;
+	/** Ask "<course> starts in 2 min. Record?" before a class. */
+	classReminders: boolean;
+	/** Use Canvas calendar events as class times too. */
+	classRemindersCanvas: boolean;
+	/** Weekly class times, one per line: `Machine Learning = Mon Wed Fri 10:00-10:50`. */
+	classSchedule: string;
+	/** Minutes before the start to ask. */
+	reminderLeadMinutes: number;
 	/** Set once the course notes from before 0.1.19 (`<folder>/<course>.md`) were moved into their course folders. */
 	courseNotesInFolders: boolean;
 }
@@ -124,6 +143,15 @@ export const DEFAULT_SETTINGS: LectureCompanionSettings = {
 	meetings: "",
 	meetingFolder: "Meetings",
 	courseNotesInFolders: false,
+	whisperVocabulary: true,
+	vocabularyExtra: "",
+	alignSlides: true,
+	detectQuestions: true,
+	catchUpMinutes: 5,
+	classReminders: true,
+	classRemindersCanvas: true,
+	classSchedule: "",
+	reminderLeadMinutes: 2,
 };
 
 /** Parses the `key = path` overrides. Keys are matched case-insensitively against course id, name and code. */

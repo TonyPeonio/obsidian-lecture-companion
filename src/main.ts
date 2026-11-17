@@ -3,7 +3,15 @@ import { describePull, pullSlides } from "./canvas-pull";
 import { conventionsBlock, upsertConventions } from "./core/agent-bridge";
 import { CanvasClient, resolveCourse, type CanvasCourse } from "./core/canvas";
 import type { HttpRequest } from "./core/http";
-import { addLectureLink, addTodos, courseNotePath, ensureTodoSection, retargetLinks, extractTodos, replaceAttachmentRefs, SECTION_MY_NOTES, dateHeading, detectDate, lectureNotePath, migrateCourseIndex, oneLineSummary, renderLectureNote, safeFileName, SECTION_SLIDES, SECTION_SUMMARY, setLectureLinkSummary, SECTION_TRANSCRIPT, stripFrontmatter, toISODate, type NoteKind } from "./core/notes";
+import { alignTranscriptToSlides } from "./core/align";
+import { buildReviewNote, buildReviewOverviewMessages, lecturesInRange, reviewNotePath } from "./core/review";
+import { buildVocabulary, definedTerms, extraVocabulary } from "./core/vocab";
+import { stripThinkTags } from "./core/summarize";
+import { LectureIndex, createApi, type LectureCompanionApi } from "./api";
+import { ClassReminders } from "./reminders";
+import { TimestampLinks } from "./timestamps";
+import type { MarkKind } from "./core/transcript";
+import { addLectureLink, addTodos, courseNotePath, formatTimestamp, renamedAttachment, sectionBody, ensureTodoSection, retargetLinks, extractTodos, replaceAttachmentRefs, SECTION_MY_NOTES, dateHeading, detectDate, lectureNotePath, migrateCourseIndex, oneLineSummary, renderLectureNote, safeFileName, SECTION_SLIDES, SECTION_SUMMARY, setLectureLinkSummary, SECTION_TRANSCRIPT, stripFrontmatter, toISODate, type NoteKind } from "./core/notes";
 import { ImportModal, importNotesAsLecture, listImportableNotes } from "./import";
 import { groupEntriesByDate, splitEntries } from "./core/split";
 import { SplitModal, type SplitChoice } from "./split-modal";
@@ -36,6 +44,10 @@ export default class LectureCompanionPlugin extends Plugin {
 	/** Every active Canvas course, hidden ones included (for the settings tab). */
 	allCourses: CanvasCourse[] = [];
 	private serverListeners = new Set<(state: ServerState) => void>();
+	lectureIndex!: LectureIndex;
+	reminders!: ClassReminders;
+	/** Public API for other plugins (Local Vault Agent): see api.ts and the README. */
+	api!: LectureCompanionApi;
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
@@ -74,6 +86,12 @@ export default class LectureCompanionPlugin extends Plugin {
 		);
 		this.session = new LectureSession(this);
 		this.matcher = new SlideMatcher(this);
+		this.lectureIndex = new LectureIndex(this);
+		this.lectureIndex.register();
+		this.api = createApi(this, this.lectureIndex);
+		new TimestampLinks(this).register();
+		this.reminders = new ClassReminders(this);
+		this.reminders.register();
 
 		this.registerView(VIEW_TYPE, (leaf) => new LectureView(leaf, this));
 		this.addRibbonIcon("mic", "Lecture Companion", () => void this.activateView());
@@ -179,7 +197,7 @@ export default class LectureCompanionPlugin extends Plugin {
 				const current = active ? this.courseOfPath(active.path) : "";
 				new RenameCourseModal(this.app, this, current, (from, to) => {
 					this.renameCourse(from, to).then(
-						(r) => new Notice(`Renamed "${from}" to "${to}": ${r.moved ? "folder and course note moved, " : ""}${r.notes} note${r.notes === 1 ? "" : "s"} updated.`, 8000),
+						(r) => new Notice(`Renamed "${from}" to "${to}": ${r.moved ? "folder and course note moved, " : ""}${r.notes} note${r.notes === 1 ? "" : "s"} updated${r.attachments ? `, ${r.attachments} recording${r.attachments === 1 ? "" : "s"} renamed` : ""}.`, 8000),
 						(err: Error) => new Notice(`Rename failed: ${err.message}`, 10_000),
 					);
 				}).open();
@@ -253,6 +271,70 @@ export default class LectureCompanionPlugin extends Plugin {
 					);
 					void this.activateView();
 				}
+				return true;
+			},
+		});
+		for (const kind of ["important", "confusing"] as MarkKind[]) {
+			this.addCommand({
+				id: `mark-${kind}`,
+				name: kind === "important" ? "Mark this moment as important" : "Mark this moment as confusing",
+				checkCallback: (checking) => {
+					const s = this.session.status;
+					if (s !== "recording" && s !== "paused") return false;
+					if (!checking) this.markMoment(kind);
+					return true;
+				},
+			});
+		}
+		this.addCommand({
+			id: "catch-up",
+			name: "Catch me up (summarize the last minutes of the recording)",
+			checkCallback: (checking) => {
+				const s = this.session.status;
+				if (s !== "recording" && s !== "paused") return false;
+				if (!checking) void this.activateView().then((view) => view?.catchUp());
+				return true;
+			},
+		});
+		this.addCommand({
+			id: "align-slides",
+			name: "Link transcript paragraphs to slides in this note",
+			checkCallback: (checking) => {
+				const file = this.app.workspace.getActiveFile();
+				if (!(file instanceof TFile) || file.extension !== "md" || this.session.isBusy) return false;
+				if (!checking) void this.alignSlidesInNote(this.targetForExistingNote(file.path), true).catch((err: Error) => new Notice(`Linking failed: ${err.message}`, 8000));
+				return true;
+			},
+		});
+		this.addCommand({
+			id: "review-note",
+			name: "Make a review note (lectures in a date range)",
+			callback: () => {
+				const active = this.app.workspace.getActiveFile();
+				new ReviewModal(this.app, this, active ? this.courseOfPath(active.path) : "", (choice) => {
+					const notice = new Notice("Writing the review note…", 0);
+					this.makeReviewNote(choice.course, choice.from, choice.to, choice.overview).then(
+						(r) => {
+							notice.hide();
+							new Notice(`Review note written: ${r.path} (${r.lectures} lecture${r.lectures === 1 ? "" : "s"}).`, 8000);
+							void this.vault.open(r.path);
+						},
+						(err: Error) => {
+							notice.hide();
+							new Notice(`Review note failed: ${err.message}`, 10_000);
+						},
+					);
+				}).open();
+			},
+		});
+		this.addCommand({
+			id: "ask-about-lecture",
+			name: "Ask about this lecture (Local Vault Agent)",
+			checkCallback: (checking) => {
+				const file = this.app.workspace.getActiveFile();
+				const path = file instanceof TFile && file.extension === "md" ? file.path : this.session.target?.path;
+				if (!path) return false;
+				if (!checking) this.askAboutLecture(path);
 				return true;
 			},
 		});
@@ -536,7 +618,7 @@ export default class LectureCompanionPlugin extends Plugin {
 	 * notes, rewrites links to them, and updates the settings that name the course (a Canvas
 	 * alias is added or changed, so new lectures and slide pulls use the new name).
 	 */
-	async renameCourse(fromName: string, toName: string): Promise<{ moved: boolean; notes: number }> {
+	async renameCourse(fromName: string, toName: string): Promise<{ moved: boolean; notes: number; attachments: number }> {
 		const from = fromName.trim();
 		const to = toName.trim();
 		if (!from || !to) throw new Error("Both names are needed.");
@@ -577,9 +659,59 @@ export default class LectureCompanionPlugin extends Plugin {
 				}
 			}
 		}
+		const attachments = await this.renameCourseAttachments(from, to, newDir);
 		if (this.session.course.toLowerCase() === from.toLowerCase() && !this.session.isBusy) this.session.reset();
 		for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) if (leaf.view instanceof LectureView) leaf.view.refreshCourses();
-		return { moved: folder instanceof TFolder, notes };
+		return { moved: folder instanceof TFolder, notes, attachments };
+	}
+
+	/**
+	 * Renames the course's recordings (and any other attachment named after the course, e.g.
+	 * `<course> <date> <time>.webm`) and points the embeds and links in its notes at the new names.
+	 * Looks in the course folder and at every file its notes embed or link (so recordings kept in
+	 * Obsidian's own attachment folder are found too). An existing file of the new name is left alone.
+	 */
+	private async renameCourseAttachments(from: string, to: string, courseDir: string): Promise<number> {
+		const dir = this.app.vault.getAbstractFileByPath(courseDir);
+		if (!(dir instanceof TFolder)) return 0;
+		const notes = this.notesUnder(dir);
+		const candidates = new Map<string, TFile>();
+		const walk = (folder: TFolder): void => {
+			for (const child of folder.children) {
+				if (child instanceof TFolder) walk(child);
+				else if (child instanceof TFile && child.extension !== "md") candidates.set(child.path, child);
+			}
+		};
+		walk(dir);
+		for (const path of notes) {
+			const file = this.vault.file(path);
+			const cache = file ? this.app.metadataCache.getFileCache(file) : null;
+			for (const ref of [...(cache?.embeds ?? []), ...(cache?.links ?? [])]) {
+				const dest = this.app.metadataCache.getFirstLinkpathDest(ref.link.split("#")[0] ?? "", path);
+				if (dest && dest.extension !== "md") candidates.set(dest.path, dest);
+			}
+		}
+		const renamed: { oldName: string; newName: string; oldPath: string }[] = [];
+		for (const file of candidates.values()) {
+			const newName = renamedAttachment(file.name, from, to);
+			if (!newName) continue;
+			const dest = normalizePath(`${file.parent?.path ?? ""}/${newName}`);
+			if (this.app.vault.getAbstractFileByPath(dest)) continue;
+			const oldPath = file.path;
+			const oldName = file.name;
+			await this.app.fileManager.renameFile(file, dest);
+			renamed.push({ oldName, newName, oldPath });
+		}
+		if (renamed.length === 0) return 0;
+		// Obsidian rewrites links itself when "Automatically update internal links" is on; this is the
+		// fallback (and a no-op when it already happened). Notes elsewhere that link the files are fixed too.
+		const linkers = new Set([...notes, ...this.linkersOf(renamed.map((r) => r.oldPath))]);
+		for (const path of linkers) {
+			const file = this.vault.file(path);
+			if (!file) continue;
+			await this.app.vault.process(file, (md) => renamed.reduce((text, r) => replaceAttachmentRefs(text, r.oldName, r.newName), md));
+		}
+		return renamed.length;
 	}
 
 	// -------------------------------------------------------------------- notes
@@ -669,12 +801,117 @@ export default class LectureCompanionPlugin extends Plugin {
 		return paths.length;
 	}
 
-	private targetForExistingNote(path: string): NoteTarget {
+	targetForExistingNote(path: string): NoteTarget {
 		// A per-course note gets today's date section; a per-lecture note is used as-is.
 		if (this.settings.noteMode === "per-course-section" || !/\/\d{4}-\d{2}-\d{2}\.md$/.test(path)) {
 			return { path, parentHeading: dateHeading(this.settings.dateHeading, toISODate()) };
 		}
 		return { path };
+	}
+
+	// ------------------------------------------------------------------ 0.2.0
+
+	/**
+	 * Words whisper should spell right in this course: the course name and code, its teachers
+	 * (Canvas), the extra words from settings, distinctive terms from this lecture's slides (else
+	 * the most recent lecture that has slide text), and terms defined in recent summaries.
+	 */
+	async courseVocabulary(course: string, target: NoteTarget): Promise<string[]> {
+		const names = [course];
+		const canvasCourse = this.isMeeting(course) ? undefined : this.canvasCourseFor(course);
+		if (canvasCourse) names.push(canvasCourse.courseCode, ...(canvasCourse.teachers ?? []));
+		names.push(...extraVocabulary(this.settings.vocabularyExtra, course));
+		const earlier = this.vault
+			.lectureNotePaths(this.folderFor(course), course)
+			.filter((p) => /\/\d{4}-\d{2}-\d{2}\.md$/.test(p) && p !== target.path)
+			.sort()
+			.reverse();
+		let slideText = cleanTranscript((await this.vault.readSection(target, SECTION_SLIDES)) ?? "", false);
+		const defined: string[] = [];
+		for (const [i, path] of earlier.slice(0, 8).entries()) {
+			const md = await this.vault.read(path).catch(() => "");
+			if (!/^>/m.test(slideText) && i < 3) slideText = cleanTranscript(sectionBody(md, SECTION_SLIDES) ?? "", false);
+			defined.push(...definedTerms(sectionBody(md, SECTION_SUMMARY) ?? ""));
+		}
+		// Only the extracted slide text (the folded callout), not the deck links and Canvas labels.
+		const calloutText = slideText.split("\n").filter((l) => l.startsWith(">")).join("\n");
+		return buildVocabulary({ names: names.filter(Boolean), defined, slideText: calloutText });
+	}
+
+	/** Adds slide links to the note's transcript paragraphs (see core/align). Returns how many. */
+	async alignSlidesInNote(target: NoteTarget, verbose: boolean): Promise<number> {
+		const transcript = (await this.vault.readSection(target, SECTION_TRANSCRIPT)) ?? "";
+		const slides = (await this.vault.readSection(target, SECTION_SLIDES)) ?? "";
+		if (!/--- (?:Page|Slide) \d+ ---/.test(slides)) {
+			if (verbose) new Notice("No slide text in this note's Slides section to link to (attach a PDF or PowerPoint deck first).", 8000);
+			return 0;
+		}
+		const { text, links } = alignTranscriptToSlides(transcript, slides);
+		if (text.trim() !== transcript.trim()) await this.vault.writeSection(target, SECTION_TRANSCRIPT, text, "replace");
+		if (verbose) new Notice(links ? `${links} transcript paragraph${links === 1 ? "" : "s"} linked to the slide being discussed.` : "No paragraph matched a slide closely enough to link.", 6000);
+		return links;
+	}
+
+	/** Puts a ⭐ / ❓ mark in the live transcript (command and panel button). */
+	markMoment(kind: MarkKind): void {
+		const mark = this.session.mark(kind);
+		if (mark) new Notice(`${kind === "important" ? "⭐ Marked important" : "❓ Marked confusing"} at ${formatTimestamp(mark.at)}`, 2500);
+	}
+
+	/** The class-time prompt's Record button: opens the panel with the course and today's date, and starts. */
+	async recordNow(course: string): Promise<void> {
+		if (this.session.isBusy) {
+			new Notice("A recording is already running.");
+			return;
+		}
+		const view = await this.activateView();
+		if (!view) return;
+		await view.recordFor(course, toISODate());
+	}
+
+	/** "Ask about this lecture": opens Local Vault Agent's chat about the note, when it is installed. */
+	askAboutLecture(path: string): void {
+		const lva = this.localVaultAgentApi();
+		if (typeof lva?.openChatAbout !== "function") {
+			new Notice("Asking about a lecture needs the Local Vault Agent plugin (installed and enabled).", 8000);
+			return;
+		}
+		try {
+			void Promise.resolve(lva.openChatAbout(path)).catch((err: Error) => new Notice(`Local Vault Agent: ${err.message}`, 8000));
+		} catch (err) {
+			new Notice(`Local Vault Agent: ${(err as Error).message}`, 8000);
+		}
+	}
+
+	/** Local Vault Agent's API object, when that plugin is installed and enabled. */
+	localVaultAgentApi(): LocalVaultAgentApi | undefined {
+		const plugins = (this.app as unknown as { plugins?: { plugins?: Record<string, { api?: unknown } | undefined> } }).plugins?.plugins;
+		const api = plugins?.["local-vault-agent"]?.api;
+		return api && typeof api === "object" ? api : undefined;
+	}
+
+	/** Writes `<course folder>/Review <from>–<to>.md` from the lectures' summaries (and an optional model-written overview). */
+	async makeReviewNote(course: string, from: string, to: string, overview: boolean): Promise<{ path: string; lectures: number }> {
+		const name = course.trim();
+		if (!name) throw new Error("Choose a course.");
+		const listed = lecturesInRange(this.lectureIndex.list(name), from, to);
+		const lectures: { path: string; date: string; summary: string }[] = [];
+		for (const l of listed) {
+			const md = await this.vault.read(l.path).catch(() => "");
+			lectures.push({ path: l.path, date: l.date, summary: sectionBody(md, SECTION_SUMMARY) ?? "" });
+		}
+		if (lectures.length === 0) throw new Error(`No lecture notes of ${name} between ${from || "the start"} and ${to || "today"}.`);
+		const input = { course: name, from: from || (lectures[0]?.date ?? ""), to: to || toISODate(), lectures };
+		let text: string | undefined;
+		if (overview) {
+			const s = this.settings;
+			text = stripThinkTags(
+				await this.ollama.chat({ model: s.ollamaModel, messages: buildReviewOverviewMessages(input), options: { num_ctx: s.numCtx, temperature: 0.3 }, keep_alive: "10m", think: false }),
+			).trim();
+		}
+		const path = reviewNotePath(`${normalizePath(this.folderFor(name))}/${safeFileName(name)}`, input.from, input.to);
+		await this.vault.write(path, buildReviewNote({ ...input, overview: text }));
+		return { path, lectures: lectures.length };
 	}
 
 	// ------------------------------------------------------------------- canvas
@@ -928,6 +1165,7 @@ export default class LectureCompanionPlugin extends Plugin {
 			const result = await this.matcher.run({ canvasCourse, course, date, target, transcript, windowOnly: false, mode: "ask", replace: true, onStatus: (m) => notice.setMessage(m) });
 			notice.hide();
 			if (result.skipped) return;
+			if (this.settings.alignSlides && result.attached.length) await this.alignSlidesInNote(target, false).catch(() => 0);
 			new Notice(result.attached.length ? `Slides replaced: ${result.attached.join(", ")}. Run "Summarize this lecture note" to refresh the summary.` : "Slides section cleared.", 8000);
 			for (const e of result.errors) new Notice(e, 8000);
 		} catch (err) {
@@ -1005,6 +1243,61 @@ export default class LectureCompanionPlugin extends Plugin {
 		const view = leaf.view instanceof LectureView ? leaf.view : null;
 		if (view && focusRecord) view.containerEl.querySelector<HTMLInputElement>(".lc-course")?.focus();
 		return view;
+	}
+}
+
+interface LocalVaultAgentApi {
+	openChatAbout?: (path: string) => unknown;
+	ollama?: () => { url: string; model: string };
+}
+
+/** "Make a review note": course, date range, and whether the model writes an overview. */
+class ReviewModal extends Modal {
+	constructor(
+		app: App,
+		private plugin: LectureCompanionPlugin,
+		private current: string,
+		private onChoose: (choice: { course: string; from: string; to: string; overview: boolean }) => void,
+	) {
+		super(app);
+	}
+
+	onOpen(): void {
+		this.titleEl.setText("Make a review note");
+		const form = this.contentEl.createDiv({ cls: "lc-import-form" });
+		form.createEl("label", { text: "Course" });
+		const course = form.createEl("input", { attr: { list: "lc-review-courses", placeholder: "Course", spellcheck: "false" } });
+		const list = form.createEl("datalist", { attr: { id: "lc-review-courses" } });
+		for (const name of this.plugin.courseNames()) list.createEl("option", { attr: { value: name } });
+		course.value = this.current;
+		form.createEl("label", { text: "Since" });
+		const from = form.createEl("input", { type: "date" });
+		from.value = toISODate(new Date(Date.now() - 28 * 86_400_000));
+		form.createEl("label", { text: "Until" });
+		const to = form.createEl("input", { type: "date" });
+		to.value = toISODate();
+		const overviewLabel = form.createEl("label", { cls: "lc-meeting" });
+		const overview = overviewLabel.createEl("input", { type: "checkbox" });
+		overview.checked = true;
+		overviewLabel.appendText(" Overview written by the model (Ollama)");
+		this.contentEl.createEl("p", {
+			cls: "setting-item-description",
+			text: "Writes Review <since>–<until>.md in the course folder: each lecture's one-sentence summary and key points, every term and definition, and the review questions, with links back to the lectures. Clear Since to start at the first lecture.",
+		});
+		const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+		buttons.createEl("button", { text: "Write review note", cls: "mod-cta" }).addEventListener("click", () => {
+			if (!course.value.trim()) {
+				new Notice("Choose a course.");
+				return;
+			}
+			this.close();
+			this.onChoose({ course: course.value.trim(), from: from.value, to: to.value, overview: overview.checked });
+		});
+		buttons.createEl("button", { text: "Cancel" }).addEventListener("click", () => this.close());
+	}
+
+	onClose(): void {
+		this.contentEl.empty();
 	}
 }
 

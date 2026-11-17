@@ -6,6 +6,7 @@ import { desktopCapturer, desktopPlatform, MicRecorder } from "./recorder";
 import { AUDIO_SOURCE_LABELS, AUDIO_SOURCES, parseAudioSource, systemAudioUnavailable } from "./core/audio/sources";
 import { DEFAULT_SETTINGS, setCourseAlias, vaultCourseName, parseSlideMatching, hiddenCourseIds } from "./settings";
 import { INSTALL_SCRIPT_WINDOWS, installerArgs, type WhisperBuild } from "./core/whisper/installer";
+import { parseWeeklySchedule } from "./core/schedule";
 import { cpuCount, defaultThreads, detectGpu, nodeDownloadDeps, nodeLocateDeps, runWindowsInstaller } from "./node/deps";
 
 export class LectureCompanionSettingTab extends PluginSettingTab {
@@ -141,6 +142,26 @@ export class LectureCompanionSettingTab extends PluginSettingTab {
 			.addText((t) =>
 				t.setValue(s.language).onChange(async (v) => {
 					s.language = v.trim() || "en";
+					await save();
+				}),
+			);
+
+		new Setting(containerEl)
+			.setName("Course vocabulary")
+			.setDesc("Tell Whisper the words of the course before each chunk: the course name and code, its teachers (Canvas), distinctive terms from this lecture's slides (else the last lecture's) and terms defined in recent summaries. Names and jargon are spelled right more often. At most 80 words, so the transcript's last sentence still fits Whisper's prompt.")
+			.addToggle((t) =>
+				t.setValue(s.whisperVocabulary).onChange(async (v) => {
+					s.whisperVocabulary = v;
+					await save();
+				}),
+			);
+
+		new Setting(containerEl)
+			.setName("Extra vocabulary")
+			.setDesc("Words Whisper keeps getting wrong, one line per course: `Machine Learning = Prof. Nguyen, Kullback-Leibler, softmax`. A line without = applies to every course.")
+			.addTextArea((t) =>
+				t.setPlaceholder("Machine Learning = Prof. Nguyen, Kullback-Leibler").setValue(s.vocabularyExtra).onChange(async (v) => {
+					s.vocabularyExtra = v;
 					await save();
 				}),
 			);
@@ -289,6 +310,27 @@ export class LectureCompanionSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
+			.setName("Mark questions from class")
+			.setDesc("Prefix short turns that end in a question mark and come after a pause with **Q:** in the transcript, and list them under Questions from class in the summary. Speakers are not identified: a question the lecturer asks the room can be marked too, and a long question that runs into the answer is missed.")
+			.addToggle((t) =>
+				t.setValue(s.detectQuestions).onChange(async (v) => {
+					s.detectQuestions = v;
+					await save();
+				}),
+			);
+
+		new Setting(containerEl)
+			.setName("Catch me up (minutes)")
+			.setDesc("The panel's Catch me up button summarizes this many minutes of the live transcript. Shown in the panel only; Add to My notes keeps it.")
+			.addText((t) =>
+				t.setValue(String(s.catchUpMinutes)).onChange(async (v) => {
+					const n = parseInt(v, 10);
+					s.catchUpMinutes = Number.isFinite(n) && n >= 1 ? n : DEFAULT_SETTINGS.catchUpMinutes;
+					await save();
+				}),
+			);
+
+		new Setting(containerEl)
 			.setName("Maximum chunk length (seconds)")
 			.setDesc("Audio is sent to Whisper at pauses, but never later than this. Shorter = text appears sooner, slightly less context per chunk.")
 			.addSlider((sl) =>
@@ -303,6 +345,57 @@ export class LectureCompanionSettingTab extends PluginSettingTab {
 			.addSlider((sl) =>
 				sl.setLimits(300, 2000, 50).setValue(s.silenceCutMs).onChange(async (v) => {
 					s.silenceCutMs = v;
+					await save();
+				}),
+			);
+
+		// --------------------------------------------------------- Class reminders
+		new Setting(containerEl).setName("Class reminders").setHeading();
+
+		new Setting(containerEl)
+			.setName("Ask to record when a class starts")
+			.setDesc("A couple of minutes before a class: \"Machine Learning starts in 2 min. Record?\" Record opens the panel with the course and today's date and starts; nothing is ever recorded without that click.")
+			.addToggle((t) =>
+				t.setValue(s.classReminders).onChange(async (v) => {
+					s.classReminders = v;
+					await save();
+				}),
+			);
+
+		const scheduleSetting = new Setting(containerEl)
+			.setName("Weekly class schedule")
+			.setDesc("One class per line: `Course = days start-end`, e.g. `Machine Learning = Mon Wed Fri 10:00-10:50` or `Algorithms = TTh 2pm-3:15pm`. Use the course's name in the vault.");
+		const scheduleResult = scheduleSetting.descEl.createDiv({ cls: "lc-setting-result" });
+		const describeSchedule = (): void => {
+			const parsed = parseWeeklySchedule(s.classSchedule);
+			scheduleResult.setText(parsed.errors.length ? `Not understood: ${parsed.errors.join(" · ")}` : parsed.classes.length ? `${parsed.classes.length} class${parsed.classes.length === 1 ? "" : "es"}.` : "");
+			scheduleResult.toggleClass("lc-ok", parsed.errors.length === 0 && parsed.classes.length > 0);
+		};
+		scheduleSetting.addTextArea((t) =>
+			t.setPlaceholder("Machine Learning = Mon Wed Fri 10:00-10:50").setValue(s.classSchedule).onChange(async (v) => {
+				s.classSchedule = v;
+				describeSchedule();
+				await save();
+			}),
+		);
+		describeSchedule();
+
+		new Setting(containerEl)
+			.setName("Use the Canvas calendar")
+			.setDesc("Also take class times from the courses' Canvas calendar events (timed events of 20 minutes to 4 hours). Many courses do not put class meetings there; the weekly schedule works without Canvas.")
+			.addToggle((t) =>
+				t.setValue(s.classRemindersCanvas).onChange(async (v) => {
+					s.classRemindersCanvas = v;
+					await save();
+				}),
+			);
+
+		new Setting(containerEl)
+			.setName("Ask this many minutes before")
+			.addText((t) =>
+				t.setValue(String(s.reminderLeadMinutes)).onChange(async (v) => {
+					const n = parseInt(v, 10);
+					s.reminderLeadMinutes = Number.isFinite(n) && n >= 1 ? n : DEFAULT_SETTINGS.reminderLeadMinutes;
 					await save();
 				}),
 			);
@@ -454,6 +547,16 @@ export class LectureCompanionSettingTab extends PluginSettingTab {
 					}),
 			);
 
+		new Setting(containerEl)
+			.setName("Link the transcript to the slides")
+			.setDesc("After a deck is matched, compare each transcript paragraph with each slide page and add a link like [[deck.pdf#page=12|slide 12]] where the slide changes. Needs the deck's text (image-only PDFs have none). The command \"Link transcript paragraphs to slides in this note\" does it for an existing note.")
+			.addToggle((t) =>
+				t.setValue(s.alignSlides).onChange(async (v) => {
+					s.alignSlides = v;
+					await save();
+				}),
+			);
+
 		const convertSetting = new Setting(containerEl)
 			.setName("Convert PowerPoint decks to PDF")
 			.setDesc("Obsidian shows PDFs inline but can only link a .pptx. Uses PowerPoint (Windows) or LibreOffice if installed; text is still extracted from the original.")
@@ -589,6 +692,28 @@ export class LectureCompanionSettingTab extends PluginSettingTab {
 				}
 			}),
 		);
+
+		const lva = this.plugin.localVaultAgentApi();
+		if (typeof lva?.ollama === "function") {
+			const getOllama = lva.ollama;
+			new Setting(containerEl)
+				.setName("Use Local Vault Agent's Ollama settings")
+				.setDesc("Copy the Ollama URL and model from Local Vault Agent, so both plugins use the same server and model.")
+				.addButton((b) =>
+					b.setButtonText("Use Local Vault Agent's Ollama settings").onClick(async () => {
+						try {
+							const { url, model } = getOllama();
+							if (url) s.ollamaUrl = url.trim();
+							if (model) s.ollamaModel = model.trim();
+							await save();
+							new Notice(`Ollama: ${s.ollamaUrl} · ${s.ollamaModel}`);
+							this.display();
+						} catch (err) {
+							new Notice(`Could not read Local Vault Agent's settings: ${(err as Error).message}`, 8000);
+						}
+					}),
+				);
+		}
 
 		new Setting(containerEl)
 			.setName("Model")

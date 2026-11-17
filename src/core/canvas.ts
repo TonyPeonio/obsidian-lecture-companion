@@ -8,6 +8,8 @@ export interface CanvasCourse {
 	name: string;
 	courseCode: string;
 	term?: string;
+	/** Teacher display names, when Canvas lists them (used for the whisper vocabulary). */
+	teachers?: string[];
 }
 
 export interface CanvasFile {
@@ -120,7 +122,7 @@ export class CanvasClient {
 	}
 
 	async listCourses(): Promise<CanvasCourse[]> {
-		const rows = await this.getAll("/api/v1/courses", { enrollment_state: "active", "include[]": "term", per_page: "50" });
+		const rows = await this.getAll("/api/v1/courses", { enrollment_state: "active", "include[]": ["term", "teachers"], per_page: "50" });
 		return rows
 			.filter((c) => typeof c.name === "string" && !c.access_restricted_by_date)
 			.map((c) => ({
@@ -128,7 +130,24 @@ export class CanvasClient {
 				name: String(c.name),
 				courseCode: typeof c.course_code === "string" ? c.course_code : "",
 				term: typeof (c.term as Json | undefined)?.name === "string" ? String((c.term as Json).name) : undefined,
+				...(Array.isArray(c.teachers) ? { teachers: (c.teachers as Json[]).map((t) => str(t.display_name)).filter(Boolean) } : {}),
 			}));
+	}
+
+	/** Timed calendar events (`type=event`) of the given courses between two dates (YYYY-MM-DD, end inclusive). */
+	async calendarEvents(courseIds: number[], startDate: string, endDate: string): Promise<{ title: string; startAt: string; endAt?: string; allDay: boolean; contextCode: string }[]> {
+		if (courseIds.length === 0) return [];
+		const out: { title: string; startAt: string; endAt?: string; allDay: boolean; contextCode: string }[] = [];
+		// Canvas accepts at most 10 context codes per request.
+		for (let i = 0; i < courseIds.length; i += 10) {
+			const codes = courseIds.slice(i, i + 10).map((id) => `course_${id}`);
+			const rows = await this.getAll("/api/v1/calendar_events", { "context_codes[]": codes, type: "event", start_date: startDate, end_date: endDate, per_page: "100" }, 5);
+			for (const e of rows) {
+				if (typeof e.start_at !== "string") continue;
+				out.push({ title: str(e.title), startAt: e.start_at, endAt: typeof e.end_at === "string" ? e.end_at : undefined, allDay: e.all_day === true, contextCode: str(e.context_code) });
+			}
+		}
+		return out;
 	}
 
 	/** Files in the course's Files area, newest first, optionally merged with files attached to Modules. */

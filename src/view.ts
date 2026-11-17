@@ -1,6 +1,7 @@
 import { type App, ItemView, MarkdownRenderer, Modal, Notice, setIcon, type WorkspaceLeaf } from "obsidian";
 import type { TranscriptSegment } from "./core/audio/pipeline";
-import { formatTimestamp, toISODate } from "./core/notes";
+import { formatTimestamp, SECTION_MY_NOTES, toISODate } from "./core/notes";
+import { MARK_LABELS } from "./core/transcript";
 import { decodeAudioFile } from "./recorder";
 import type LectureCompanionPlugin from "./main";
 import type { ServerState } from "./core/whisper/server";
@@ -21,6 +22,14 @@ export class LectureView extends ItemView {
 	private fileBtn!: HTMLButtonElement;
 	private pasteBtn!: HTMLButtonElement;
 	private noteBtn!: HTMLButtonElement;
+	private importantBtn!: HTMLButtonElement;
+	private confusingBtn!: HTMLButtonElement;
+	private catchUpBtn!: HTMLButtonElement;
+	private catchUpEl!: HTMLElement;
+	private catchUpBody!: HTMLElement;
+	private catchUpAbort?: AbortController;
+	private catchUpText = "";
+	private renderedMarks = 0;
 	private fileInput!: HTMLInputElement;
 	private serverPill!: HTMLElement;
 	private levelMeter!: HTMLProgressElement;
@@ -78,6 +87,9 @@ export class LectureView extends ItemView {
 		this.recordBtn.addClass("mod-cta");
 		this.pauseBtn = iconButton(buttons, "pause", "Pause", () => this.togglePause());
 		this.stopBtn = iconButton(buttons, "square", "Stop and write the note", () => void this.stopRecording());
+		this.importantBtn = iconButton(buttons, "star", "Mark this moment as important (⭐ in the transcript; the summary gives it priority)", () => this.plugin.markMoment("important"));
+		this.confusingBtn = iconButton(buttons, "help-circle", "Mark this moment as confusing (❓ in the transcript; the summary explains it more thoroughly)", () => this.plugin.markMoment("confusing"));
+		this.catchUpBtn = iconButton(buttons, "history", "Catch me up: summarize the last few minutes", () => void this.catchUp());
 		this.newBtn = iconButton(buttons, "file-plus", "New recording (clear the panel for the next class)", () => this.newRecording());
 		this.fileInput = root.createEl("input", { type: "file", cls: "lc-file-input", attr: { accept: "audio/*,video/*,.webm,.m4a,.mp3,.wav,.ogg,.opus,.flac,.aac,.mp4" } });
 		this.fileInput.addEventListener("change", () => void this.transcribeChosenFile());
@@ -87,6 +99,7 @@ export class LectureView extends ItemView {
 		iconButton(buttons, "download", "Pull slides from Canvas for this date", () => void this.pullSlides());
 		iconButton(buttons, "sparkles", "Summarize", () => void this.summarize());
 		iconButton(buttons, "file-text", "Open lecture note", () => void this.openNote());
+		iconButton(buttons, "message-circle", "Ask about this lecture (Local Vault Agent)", () => this.askAboutLecture());
 
 		// Status
 		const status = root.createDiv({ cls: "lc-status" });
@@ -100,6 +113,15 @@ export class LectureView extends ItemView {
 		this.progressText = progressRow.createSpan({ cls: "lc-progress-text" });
 		this.errorEl = root.createDiv({ cls: "lc-error" });
 
+		// Catch-up box (hidden until used)
+		this.catchUpEl = root.createDiv({ cls: "lc-catchup is-hidden" });
+		const catchUpHead = this.catchUpEl.createDiv({ cls: "lc-catchup-head" });
+		catchUpHead.createSpan({ text: "Catch-up", cls: "lc-label" });
+		const catchUpActions = catchUpHead.createDiv({ cls: "lc-buttons" });
+		iconButton(catchUpActions, "file-plus-2", "Add to My notes", () => void this.addCatchUpToNotes());
+		iconButton(catchUpActions, "x", "Close", () => this.closeCatchUp());
+		this.catchUpBody = this.catchUpEl.createDiv({ cls: "lc-catchup-body markdown-rendered" });
+
 		// Transcript + summary
 		const body = root.createDiv({ cls: "lc-body" });
 		body.createEl("h5", { text: "Transcript", cls: "lc-heading" });
@@ -109,7 +131,10 @@ export class LectureView extends ItemView {
 
 		const session = this.plugin.session;
 		this.unsubscribe.push(
-			session.subscribe(() => this.render()),
+			session.subscribe(() => {
+				this.render();
+				this.appendMarks();
+			}),
 			session.onSegments((segs) => this.appendSegments(segs)),
 			session.onSummaryDelta((delta) => this.appendSummary(delta)),
 			this.plugin.onServerState(() => this.render()),
@@ -167,6 +192,80 @@ export class LectureView extends ItemView {
 		} catch (err) {
 			new Notice(`Could not start: ${(err as Error).message}`, 8000);
 		}
+	}
+
+	/** Fills in the course and date and starts recording (the class-time prompt's Record button). */
+	async recordFor(course: string, date: string): Promise<void> {
+		if (this.plugin.session.isBusy) return;
+		if (this.plugin.session.status === "done" || this.plugin.session.status === "error") this.plugin.session.reset();
+		this.courseInput.value = course;
+		this.dateInput.value = date;
+		this.meetingTouched = false;
+		this.syncMeeting();
+		await this.startRecording();
+	}
+
+	/** "Catch me up": streams a short summary of the last N minutes into the panel. */
+	async catchUp(): Promise<void> {
+		const session = this.plugin.session;
+		if (session.status !== "recording" && session.status !== "paused") {
+			new Notice("Catch-up works while recording.");
+			return;
+		}
+		this.catchUpAbort?.abort();
+		const abort = new AbortController();
+		this.catchUpAbort = abort;
+		const minutes = Math.max(1, this.plugin.settings.catchUpMinutes);
+		this.catchUpText = "";
+		this.catchUpEl.removeClass("is-hidden");
+		this.catchUpBody.setText(`Summarizing the last ${minutes} min…`);
+		try {
+			let streamed = "";
+			const text = await session.catchUp(
+				minutes,
+				(delta) => {
+					streamed += delta;
+					this.catchUpBody.setText(streamed);
+				},
+				abort.signal,
+			);
+			if (abort.signal.aborted) return;
+			this.catchUpText = `**Catch-up at ${formatTimestamp(session.recordedSec)}** (last ${minutes} min)\n\n${text}`;
+			this.catchUpBody.empty();
+			await MarkdownRenderer.render(this.app, text, this.catchUpBody, session.target?.path ?? "", this);
+		} catch (err) {
+			if (err instanceof Error && err.name === "AbortError") return;
+			this.catchUpBody.setText(`Catch-up failed: ${(err as Error).message}`);
+		}
+	}
+
+	private closeCatchUp(): void {
+		this.catchUpAbort?.abort();
+		this.catchUpAbort = undefined;
+		this.catchUpEl.addClass("is-hidden");
+		this.catchUpBody.empty();
+		this.catchUpText = "";
+	}
+
+	private async addCatchUpToNotes(): Promise<void> {
+		const target = this.plugin.session.target;
+		if (!target || !this.catchUpText) {
+			new Notice("Nothing to add yet.");
+			return;
+		}
+		await this.plugin.vault.writeSection(target, SECTION_MY_NOTES, this.catchUpText, "append");
+		new Notice("Catch-up added to My notes.");
+		this.closeCatchUp();
+	}
+
+	private askAboutLecture(): void {
+		const session = this.plugin.session;
+		const target = session.target ?? this.plugin.noteTargetFor(this.courseInput.value.trim(), this.dateInput.value || toISODate());
+		if (!this.plugin.vault.exists(target.path)) {
+			new Notice(`No lecture note at ${target.path} yet.`);
+			return;
+		}
+		this.plugin.askAboutLecture(target.path);
 	}
 
 	/** Opens the OS file picker for an existing recording (used by the panel button and the command). */
@@ -297,6 +396,10 @@ export class LectureView extends ItemView {
 		this.pasteBtn.toggleClass("is-hidden", live || session.status === "summarizing");
 		this.noteBtn.toggleClass("is-hidden", live || session.status === "summarizing");
 		this.pauseBtn.toggleClass("is-hidden", !(session.status === "recording" || session.status === "paused"));
+		const capturing = session.status === "recording" || session.status === "paused";
+		this.importantBtn.toggleClass("is-hidden", !capturing);
+		this.confusingBtn.toggleClass("is-hidden", !capturing);
+		this.catchUpBtn.toggleClass("is-hidden", !capturing);
 		this.stopBtn.toggleClass("is-hidden", !(session.status === "recording" || session.status === "paused"));
 		setIcon(this.pauseBtn, session.status === "paused" ? "play" : "pause");
 		this.pauseBtn.setAttribute("aria-label", session.status === "paused" ? "Resume" : "Pause");
@@ -331,7 +434,9 @@ export class LectureView extends ItemView {
 	private rebuildTranscript(): void {
 		this.transcriptEl.empty();
 		this.renderedSegments = 0;
+		this.renderedMarks = 0;
 		this.appendSegments(this.plugin.session.segments);
+		this.appendMarks();
 		this.summaryEl.empty();
 		this.summaryStreaming = "";
 		if (this.plugin.session.summary) void this.renderSummary(this.plugin.session.summary);
@@ -350,6 +455,20 @@ export class LectureView extends ItemView {
 			this.transcriptEl.querySelector(".lc-placeholder")?.remove();
 		}
 		this.transcriptEl.scrollTop = this.transcriptEl.scrollHeight;
+	}
+
+	/** Shows marks set since the last render as lines in the live transcript. */
+	private appendMarks(): void {
+		const marks = this.plugin.session.marks;
+		if (marks.length < this.renderedMarks) this.renderedMarks = 0;
+		for (const m of marks.slice(this.renderedMarks)) {
+			const p = this.transcriptEl.createEl("p", { cls: `lc-segment lc-mark lc-mark-${m.kind}` });
+			p.createSpan({ cls: "lc-ts", text: formatTimestamp(m.at) });
+			p.appendText(` ${MARK_LABELS[m.kind]}`);
+			this.transcriptEl.querySelector(".lc-placeholder")?.remove();
+			this.transcriptEl.scrollTop = this.transcriptEl.scrollHeight;
+		}
+		this.renderedMarks = marks.length;
 	}
 
 	private appendSummary(delta: string): void {

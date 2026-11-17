@@ -1,5 +1,6 @@
 import { tfidfSimilarities } from "./match";
 import type { ChatMessage, OllamaClient } from "./ollama";
+import { hasMarks, hasQuestions } from "./transcript";
 
 /**
  * A transcript with less speech than this is not summarized: with 20 seconds of speech and
@@ -69,8 +70,26 @@ Bullets of "**term** — definition" for concepts introduced or defined. Omit th
 Bullets for any examples, derivations or formulas (use LaTeX between $ signs for math). Omit the section if there are none.
 ### Announcements and deadlines
 Anything about homework, exams, readings or logistics. Omit the section if there are none.
+### Questions from class
+Questions someone in the room asked and how the lecturer answered, one bullet each ("question → answer"). Omit the section if there are none.
 ### Questions to review
 2 to 5 questions a student should be able to answer after this lecture.`;
+}
+
+/** Extra instructions when the transcript carries the student's marks or detected questions. */
+export function transcriptHints(transcript: string): string {
+	const out: string[] = [];
+	if (hasMarks(transcript)) {
+		out.push(
+			'Lines "**[m:ss]** ⭐ Important" and "**[m:ss]** ❓ Confusing" are marks the student set while listening; they come right after the paragraph that was being said (the mark time is when the button was pressed, so the material is usually in the paragraph just before). Give the material around an Important mark priority in Key points. Explain the material around a Confusing mark more thoroughly than the rest, in plain words and step by step, from what was said (in Key points or Worked examples); add a review question about it. Never cite a mark line\'s own timestamp; cite the paragraph\'s.',
+		);
+	}
+	if (hasQuestions(transcript)) {
+		out.push(
+			'Paragraphs that start with "**Q:**" were detected as questions from someone in class (a short turn ending in "?" after a pause; speakers are not identified, so some may be the lecturer asking the room). List the real ones under Questions from class with the lecturer\'s answer from the following paragraphs.',
+		);
+	}
+	return out.join("\n");
 }
 
 function meetingPrompt(source: "transcript" | "notes"): string {
@@ -192,8 +211,10 @@ export function buildSummaryMessages(input: SummaryInput, numCtx: number): ChatM
 	parts.push("", input.source === "notes" ? (meeting ? "## Notes" : "## Student's notes") : "## Transcript", "", fitted.transcript);
 	if (input.extraInstructions?.trim()) parts.push("", meeting ? "## Additional instructions" : "## Additional instructions from the student", "", input.extraInstructions.trim());
 	const source = input.source ?? "transcript";
+	const hints = source === "transcript" ? transcriptHints(fitted.transcript) : "";
+	const system = meeting ? meetingPrompt(source) : systemPrompt(source);
 	return [
-		{ role: "system", content: meeting ? meetingPrompt(source) : systemPrompt(source) },
+		{ role: "system", content: hints ? `${system}\n${hints}` : system },
 		{ role: "user", content: parts.join("\n") },
 	];
 }

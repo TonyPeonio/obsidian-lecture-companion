@@ -440,6 +440,20 @@ export function replaceAttachmentRefs(markdown: string, oldName: string, newName
 	return markdown.replace(new RegExp(`\\[\\[(?:[^\\]|]*/)?${esc}(\\||\\]\\])`, "g"), (_m, tail: string) => `[[${newName}${tail}`);
 }
 
+/**
+ * New name for an attachment when its course is renamed: recordings are named
+ * `<course> <date> <time>.ext`, so a file whose name starts with the old course name followed by
+ * a space (or `-`/`_`) gets the new name in its place. Null when the name does not start with it.
+ */
+export function renamedAttachment(fileName: string, fromCourse: string, toCourse: string): string | null {
+	const from = safeFileName(fromCourse);
+	const to = safeFileName(toCourse);
+	if (from === to || fileName.length <= from.length) return null;
+	if (fileName.slice(0, from.length).toLowerCase() !== from.toLowerCase()) return null;
+	if (!/^[ _-]/.test(fileName.slice(from.length))) return null;
+	return `${to}${fileName.slice(from.length)}`;
+}
+
 export const SECTION_TODO = "TODO";
 const TASK_MARKERS = /[📅🛫✅⏳🔁➕⏫🔼🔽🔺⏬❌]/u;
 

@@ -150,7 +150,6 @@
 	border: 1px solid var(--background-modifier-border);
 	border-radius: var(--radius-m);
 	font-size: var(--font-ui-small);
-	white-space: pre-wrap;
 }
 
 .lc-summary.markdown-rendered {
@@ -338,4 +337,87 @@
 }
 .lc-setting-note:empty {
 	display: none;
+}
+
+/* 0.2.0: clickable timestamps */
+.lc-timestamp {
+	cursor: pointer;
+	color: var(--text-accent);
+	text-decoration: underline dotted;
+	text-underline-offset: 2px;
+}
+
+.lc-timestamp:hover {
+	color: var(--text-accent-hover);
+}
+
+.lc-player {
+	position: fixed;
+	right: var(--size-4-4);
+	bottom: var(--size-4-8);
+	z-index: var(--layer-popover);
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--size-2-2);
+	max-width: 360px;
+	padding: var(--size-4-2);
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	box-shadow: var(--shadow-s);
+}
+
+.lc-player.is-hidden {
+	display: none;
+}
+
+.lc-player-label {
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: var(--font-ui-small);
+	color: var(--text-muted);
+}
+
+.lc-player audio {
+	width: 100%;
+}
+
+/* 0.2.0: marks and catch-up in the panel */
+.lc-mark {
+	font-weight: var(--font-semibold);
+}
+
+.lc-mark-important {
+	color: var(--color-yellow);
+}
+
+.lc-mark-confusing {
+	color: var(--color-purple);
+}
+
+.lc-catchup {
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	padding: var(--size-4-2);
+	background: var(--background-secondary);
+}
+
+.lc-catchup.is-hidden {
+	display: none;
+}
+
+.lc-catchup-head {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+}
+
+.lc-catchup-body {
+	max-height: 14em;
+	overflow-y: auto;
+	font-size: var(--font-ui-small);
 }

@@ -27,7 +27,7 @@ describe("CanvasClient", () => {
 
 	it("follows Link pagination for courses and skips restricted ones", async () => {
 		const { client, routes } = fakeCanvas();
-		routes.set("/api/v1/courses?enrollment_state=active&include%5B%5D=term&per_page=50", {
+		routes.set("/api/v1/courses?enrollment_state=active&include%5B%5D=term&include%5B%5D=teachers&per_page=50", {
 			body: [{ id: 1, name: "CS101", course_code: "CS-101", term: { name: "Fall" } }, { id: 2, access_restricted_by_date: true }],
 			headers: { Link: '<https://school.test/api/v1/courses?page=2>; rel="next", <https://school.test/api/v1/courses?page=1>; rel="first"' },
 		});
