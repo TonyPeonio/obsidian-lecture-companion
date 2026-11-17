@@ -40,7 +40,12 @@ export class TimestampLinks {
 
 	private process(el: HTMLElement, ctx: MarkdownPostProcessorContext): void {
 		if (!/\[\d{1,3}:\d{2}/.test(el.textContent ?? "")) return;
-		if (!this.audioFileOf(ctx.sourcePath)) return;
+		// Right after Obsidian starts, a note can render before the metadata index has reached it,
+		// and the recording cannot be found yet. Decorate anyway then (a click looks the recording up
+		// again and says so if there is none); skip only notes that are indexed and have no recording.
+		const file = this.plugin.app.vault.getAbstractFileByPath(ctx.sourcePath);
+		const indexed = file instanceof TFile && this.plugin.app.metadataCache.getFileCache(file) !== null;
+		if (indexed && !this.audioFileOf(ctx.sourcePath)) return;
 		const walker = el.ownerDocument.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
 			acceptNode: (node) => (node.parentElement?.closest("code, pre, a, .lc-timestamp") ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
 		});
