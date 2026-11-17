@@ -14,6 +14,7 @@ export const EN = {
 	"cmd.splitNote": "Split this note into lectures (one per date)",
 	"cmd.importFolder": "Import all notes in this folder as lectures",
 	"cmd.renameCourse": "Rename a course (folder, course note, recordings, links and settings)",
+	"cmd.repairCourseLinks": "Repair links that still point at a course's old folder name",
 	"cmd.rebuildIndex": "Rebuild course note links (list every lecture note under its date)",
 	"cmd.moveTodos": "Move tasks from this note to the course TODO list",
 	"cmd.convertPptx": "Convert PowerPoint decks in this note to PDF",

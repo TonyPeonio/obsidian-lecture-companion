@@ -3,6 +3,7 @@ import {
 	addLectureLink,
 	courseNotePath,
 	legacyCourseNotePath,
+	planCourseLinkRepairs,
 	retargetLinks,
 	detectDate,
 	migrateCourseIndex,
@@ -120,6 +121,35 @@ describe("paths and formatting", () => {
 		expect(retargetLinks("[[School/ASE/2026-08-24|Mon]]", "School/ASE/2026-08-24", "School/Advanced Software Engineering/2026-08-24")).toBe(
 			"[[School/Advanced Software Engineering/2026-08-24|Mon]]",
 		);
+	});
+
+	it("plans repairs only for broken links inside a course folder whose target exists there", () => {
+		const old = "School/Fall 2026 ALGORITHMS (CSCI-406-A, CSCI-598F-A, ORWE-506-A)";
+		const files = new Set([
+			"School/Algorithms/Algorithms.md",
+			"School/Algorithms/2026-08-25.md",
+			"School/Advanced Software Engineering/2026-08-24.md",
+			"School/Machine Learning/2026-08-25.md",
+			"Daily Notes/2026-08-24.md",
+		]);
+		const plans = planCourseLinkRepairs(
+			[
+				{ path: "School/Algorithms/Algorithms.md", unresolved: [`${old}/2026-08-25`, `${old}/2026-12-01`, "Willett Lab"] },
+				{ path: "School/Advanced Software Engineering/2026-08-24.md", unresolved: ["School/Lectures - CSCI 370/2026-08-24"] },
+				// Outside a course folder: left alone (the date exists in more than one course).
+				{ path: "Daily Notes/2026-08-24.md", unresolved: ["School/Lectures - CSCI 370/2026-08-24"] },
+				// Not under the course root, and a deeper path: left alone.
+				{ path: "School/Machine Learning/2026-08-25.md", unresolved: ["Work/Old/2026-08-25", "School/A/B/2026-08-25"] },
+			],
+			["School", "Meetings"],
+			files,
+		);
+		expect(plans).toEqual([
+			{ path: "School/Algorithms/Algorithms.md", swaps: [[`${old}/2026-08-25`, "School/Algorithms/2026-08-25"]] },
+			{ path: "School/Advanced Software Engineering/2026-08-24.md", swaps: [["School/Lectures - CSCI 370/2026-08-24", "School/Advanced Software Engineering/2026-08-24"]] },
+		]);
+		const fixed = retargetLinks(`- [[${old}/2026-08-25|2026-08-25 lecture]] — Dynamic programming.`, `${old}/2026-08-25`, "School/Algorithms/2026-08-25");
+		expect(fixed).toBe("- [[School/Algorithms/2026-08-25|2026-08-25 lecture]] — Dynamic programming.");
 	});
 
 	it("retargets markdown links by vault path, encoded or not", () => {

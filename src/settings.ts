@@ -119,6 +119,8 @@ export interface LectureCompanionSettings {
 	surveyDone: boolean;
 	/** Set once the course notes from before 0.1.19 (`<folder>/<course>.md`) were moved into their course folders. */
 	courseNotesInFolders: boolean;
+	/** Set once links left pointing at a course's old folder name (renames before 0.3.1) were repaired. */
+	courseLinksRepaired: boolean;
 }
 
 export const DEFAULT_SETTINGS: LectureCompanionSettings = {
@@ -164,6 +166,7 @@ export const DEFAULT_SETTINGS: LectureCompanionSettings = {
 	meetings: "",
 	meetingFolder: "Meetings",
 	courseNotesInFolders: false,
+	courseLinksRepaired: false,
 	whisperVocabulary: true,
 	vocabularyExtra: "",
 	alignSlides: true,

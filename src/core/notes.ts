@@ -155,6 +155,40 @@ export function retargetLinks(markdown: string, from: string, to: string): strin
 	return out;
 }
 
+/**
+ * Plans repairs for links left pointing at a course folder's old name (Rename a course before
+ * 0.3.1 could leave them, and so can renaming a course folder by hand). Only broken links into a
+ * course/meeting root are considered (`<root>/<old folder>/<name>`), and only in notes inside a
+ * course folder: the new target is `<root>/<that note's own course folder>/<name>.md`, used only
+ * when that file exists. Links in notes elsewhere are left alone, since a lecture name (a date)
+ * can exist in several courses and the right one cannot be told. Paths are vault paths;
+ * `unresolved` are link targets as Obsidian lists them.
+ */
+export function planCourseLinkRepairs(
+	notes: { path: string; unresolved: string[] }[],
+	roots: string[],
+	files: ReadonlySet<string>,
+): { path: string; swaps: [from: string, to: string][] }[] {
+	const rootList = roots.map((r) => trimSlashes(r)).filter(Boolean);
+	const out: { path: string; swaps: [string, string][] }[] = [];
+	for (const note of notes) {
+		const swaps: [string, string][] = [];
+		for (const raw of note.unresolved) {
+			const link = raw.replace(/\.md$/, "");
+			const root = rootList.find((r) => link.startsWith(`${r}/`));
+			if (!root) continue;
+			const parts = link.slice(root.length + 1).split("/");
+			if (parts.length !== 2) continue;
+			const own = note.path.startsWith(`${root}/`) ? note.path.slice(root.length + 1).split("/") : null;
+			if (!own || own.length < 2) continue;
+			const target = `${root}/${own[0]}/${parts[1]}`;
+			if (target !== link && files.has(`${target}.md`)) swaps.push([link, target]);
+		}
+		if (swaps.length) out.push({ path: note.path, swaps });
+	}
+	return out;
+}
+
 function trimSlashes(p: string): string {
 	return p.replace(/^\/+|\/+$/g, "");
 }

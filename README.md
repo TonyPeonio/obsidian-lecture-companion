@@ -385,6 +385,7 @@ inside the meeting folder counts as a meeting series. The import dialogs (*paste
 | Pull today's Canvas slides | Fetches today's new PDF/PPTX files from every active course |
 | Pull Canvas slides for a date… | Same, for a date you choose |
 | Rename a course | Renames the course folder and course note, updates `course:` in its notes, renames recordings named after the course (`<course> <date> <time>.webm`) and repoints their embeds, keeps links working, and saves the new name for the Canvas course |
+| Repair links that still point at a course's old folder name | In notes inside course and meeting folders, points broken links to `<old folder>/<name>` at the note's own course folder when `<name>` exists there (backed up first). Runs once by itself after updating to 0.3.2 |
 | Mark this moment as important / as confusing | While recording: adds `**[m:ss]** ⭐ Important` or `❓ Confusing` to the transcript (give them hotkeys in Settings → Hotkeys) |
 | Catch me up | While recording: summarizes the last few minutes in the panel |
 | Link transcript paragraphs to slides in this note | Adds `[[deck.pdf#page=N\|slide N]]` links to the open note's transcript where the slide changes (replaces earlier links) |

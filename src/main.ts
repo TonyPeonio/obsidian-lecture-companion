@@ -12,7 +12,7 @@ import { LectureIndex, createApi, type LectureCompanionApi } from "./api";
 import { ClassReminders } from "./reminders";
 import { TimestampLinks } from "./timestamps";
 import type { MarkKind } from "./core/transcript";
-import { addLectureLink, addTodos, courseNotePath, formatTimestamp, renamedAttachment, sectionBody, ensureTodoSection, retargetLinks, extractTodos, replaceAttachmentRefs, SECTION_MY_NOTES, dateHeading, detectDate, lectureNotePath, migrateCourseIndex, oneLineSummary, renderLectureNote, safeFileName, SECTION_SLIDES, SECTION_SUMMARY, setLectureLinkSummary, SECTION_TRANSCRIPT, stripFrontmatter, toISODate, type NoteKind } from "./core/notes";
+import { addLectureLink, addTodos, courseNotePath, planCourseLinkRepairs, formatTimestamp, renamedAttachment, sectionBody, ensureTodoSection, retargetLinks, extractTodos, replaceAttachmentRefs, SECTION_MY_NOTES, dateHeading, detectDate, lectureNotePath, migrateCourseIndex, oneLineSummary, renderLectureNote, safeFileName, SECTION_SLIDES, SECTION_SUMMARY, setLectureLinkSummary, SECTION_TRANSCRIPT, stripFrontmatter, toISODate, type NoteKind } from "./core/notes";
 import { ImportModal, importNotesAsLecture, listImportableNotes } from "./import";
 import { groupEntriesByDate, splitEntries } from "./core/split";
 import { SplitModal, type SplitChoice } from "./split-modal";
@@ -235,6 +235,16 @@ export default class LectureCompanionPlugin extends Plugin {
 			},
 		});
 		this.addCommand({
+			id: "repair-course-links",
+			name: t("cmd.repairCourseLinks"),
+			callback: () => {
+				this.repairCourseLinks().then(
+					(r) => new Notice(r.links > 0 ? `Repaired ${r.links} link${r.links === 1 ? "" : "s"} in ${r.notes} note${r.notes === 1 ? "" : "s"} (backed up first).` : "No broken links to renamed course folders found.", 8000),
+					(err: Error) => new Notice(`Repair failed: ${err.message}`, 10_000),
+				);
+			},
+		});
+		this.addCommand({
 			id: "rebuild-course-index",
 			name: t("cmd.rebuildIndex"),
 			callback: async () => {
@@ -408,7 +418,8 @@ export default class LectureCompanionPlugin extends Plugin {
 		this.app.workspace.onLayoutReady(() => {
 			// One-time move of old course notes into their folders; it runs before the daily pull,
 			// which would otherwise create the new course note first and leave the old one behind.
-			const moved = this.settings.courseNotesInFolders ? Promise.resolve() : this.migrateCourseNotes();
+			const migrated = this.settings.courseNotesInFolders ? Promise.resolve() : this.migrateCourseNotes();
+			const moved = this.settings.courseLinksRepaired ? migrated : migrated.then(() => this.repairCourseLinksOnce());
 			void this.syncAgentConventions(false);
 			if (this.lms().configured) {
 				void this.refreshCourses().catch(() => undefined);
@@ -730,6 +741,40 @@ export default class LectureCompanionPlugin extends Plugin {
 		await this.backupNotes([...paths, ...this.linkersOf(paths)], "move course notes");
 		for (const m of moves) await this.moveWithLinks(m.file, m.dest);
 		return moves.length;
+	}
+
+	/**
+	 * Repairs links left pointing at a course folder's old name (see {@link planCourseLinkRepairs}):
+	 * only links that are broken now are changed, and every note it edits is backed up first.
+	 */
+	async repairCourseLinks(): Promise<{ links: number; notes: number }> {
+		await this.waitForLinkIndex();
+		const roots = [this.settings.courseFolder, ...(this.meetingFolderSeparate() ? [this.settings.meetingFolder] : [])];
+		const markdown = this.app.vault.getMarkdownFiles();
+		const notes = markdown.map((f) => ({ path: f.path, unresolved: Object.keys(this.app.metadataCache.unresolvedLinks[f.path] ?? {}) }));
+		const plans = planCourseLinkRepairs(notes, roots, new Set(markdown.map((f) => f.path)));
+		if (plans.length === 0) return { links: 0, notes: 0 };
+		await this.backupNotes(plans.map((p) => p.path), "repair course links");
+		let links = 0;
+		for (const plan of plans) {
+			const file = this.vault.file(plan.path);
+			if (!file) continue;
+			await this.app.vault.process(file, (md) => plan.swaps.reduce((text, [from, to]) => retargetLinks(text, from, to), md));
+			links += plan.swaps.length;
+		}
+		return { links, notes: plans.length };
+	}
+
+	/** Startup, once: repairs links that Rename a course before 0.3.1 left pointing at old folder names. */
+	private async repairCourseLinksOnce(): Promise<void> {
+		try {
+			const r = await this.repairCourseLinks();
+			this.settings.courseLinksRepaired = true;
+			await this.saveSettings();
+			if (r.links > 0) new Notice(`Lecture Companion repaired ${r.links} link${r.links === 1 ? "" : "s"} in ${r.notes} note${r.notes === 1 ? "" : "s"} that still pointed at a course's old folder name (backed up first).`, 12_000);
+		} catch (err) {
+			new Notice(`Could not repair links to renamed courses: ${(err as Error).message}`, 10_000);
+		}
 	}
 
 	/**

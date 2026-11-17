@@ -45,6 +45,20 @@ describe("Lecture Companion in Obsidian", function () {
 		expect(made.length).toBeGreaterThan(0);
 	});
 
+	it("repairs course-note links left at a course's old folder name, and nothing outside course folders", async function () {
+		await browser.waitUntil(
+			() =>
+				browser.executeObsidian(
+					({ app }, p) => (app.metadataCache.resolvedLinks[p]?.["Courses/Algo/2026-09-01.md"] ?? 0) > 0 && Object.keys(app.metadataCache.unresolvedLinks[p] ?? {}).length === 0,
+					"Courses/Algo/Algo.md",
+				),
+			{ timeout: 30_000, timeoutMsg: "the course note's link to its lecture was not repaired" },
+		);
+		expect(await read("Courses/Algo/Algo.md")).toContain("- [[Courses/Algo/2026-09-01|2026-09-01 lecture]] — Dynamic programming.");
+		expect(await read("Inbox/old-link.md")).toContain("[[Courses/Old Algo/2026-09-01]]");
+		expect((await backups()).some((f) => f.includes("repair course links"))).toBe(true);
+	});
+
 	it("renames a course, its course note, recording and links", async function () {
 		await browser.waitUntil(() => exists("Courses/Bio/Bio.md"), { timeout: 30_000 });
 		await browser.executeObsidian(async ({ plugins }) => {
@@ -59,6 +73,17 @@ describe("Lecture Companion in Obsidian", function () {
 		expect(note).not.toContain("ML Old 2026-10-01");
 		const inbox = await read("Inbox/links.md");
 		expect(inbox).not.toContain("ML Old");
+		// The course note's own list of lectures follows the folder too (it used to keep the old path).
+		const courseNote = "Courses/Machine Learning/Machine Learning.md";
+		expect(await read(courseNote)).not.toContain("ML Old");
+		await browser.waitUntil(
+			() =>
+				browser.executeObsidian(
+					({ app }, p) => (app.metadataCache.resolvedLinks[p]?.["Courses/Machine Learning/2026-10-01.md"] ?? 0) > 0 && Object.keys(app.metadataCache.unresolvedLinks[p] ?? {}).length === 0,
+					courseNote,
+				),
+			{ timeout: 15_000, timeoutMsg: "the course note's lecture link does not resolve after the rename" },
+		);
 		expect((await backups()).some((f) => f.includes("rename ML Old"))).toBe(true);
 	});
 
