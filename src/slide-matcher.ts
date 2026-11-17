@@ -2,7 +2,8 @@
 // text cache so decks are downloaded once), ranks them against the transcript, asks the user
 // unless the match is clear, then attaches the chosen files to the note.
 
-import { loadPdfJs, Notice } from "obsidian";
+import { loadPdfJs } from "obsidian";
+import { LcNotice as Notice } from "./report-modal";
 import type { CanvasCourse, CanvasFile } from "./core/canvas";
 import { extractSlideText, slideKind } from "./core/extract";
 import type { PdfJsLike } from "./core/extract/pdf";
@@ -100,7 +101,7 @@ export class SlideMatcher {
 			if (existing.includes(`[[${safeName}`) || existing.includes(`[[${safeName.replace(/\.pptx$/i, ".pdf")}`)) continue;
 			req.onStatus?.(`Downloading ${file.displayName}…`);
 			try {
-				const { bytes } = await this.plugin.canvas.download(file);
+				const { bytes } = await this.plugin.lms().download(file);
 				const saved = await this.plugin.saveDeck(bytes, safeName, req.target.path);
 				if (saved.note) result.errors.push(`${file.displayName}: ${saved.note}`);
 				attachments.push({
@@ -122,10 +123,10 @@ export class SlideMatcher {
 
 	/** Slide files of a course, newest first: the whole course, or only the look-back window around `date`. */
 	async listFiles(canvasCourse: CanvasCourse, date: string, windowOnly: boolean): Promise<CanvasFile[]> {
-		if (!windowOnly) return (await this.plugin.canvas.listFiles(canvasCourse.id, {})).slice(0, MAX_CANDIDATES);
+		if (!windowOnly) return (await this.plugin.lms().listFiles(canvasCourse.id, {})).slice(0, MAX_CANDIDATES);
 		const until = addDays(startOfDay(date), 1);
 		const since = addDays(until, -Math.max(1, this.plugin.settings.lookbackDays));
-		return (await this.plugin.canvas.listFiles(canvasCourse.id, { since, until })).slice(0, MAX_CANDIDATES);
+		return (await this.plugin.lms().listFiles(canvasCourse.id, { since, until })).slice(0, MAX_CANDIDATES);
 	}
 
 	async candidateCount(canvasCourse: CanvasCourse, date: string, windowOnly: boolean): Promise<number> {
@@ -141,7 +142,9 @@ export class SlideMatcher {
 		let dirty = false;
 		for (const file of list) {
 			files.set(file.id, file);
-			const key = String(file.id);
+			// Canvas keys are bare ids (caches from before 0.3.0 stay valid); other sites get a prefix.
+			const kind = this.plugin.lms().kind;
+			const key = kind === "canvas" ? String(file.id) : `${kind}:${file.id}`;
 			const hit = cache.entries[key];
 			let text: string;
 			if (hit && hit.updatedAt === file.updatedAt) {
@@ -161,7 +164,7 @@ export class SlideMatcher {
 	private async extract(file: CanvasFile): Promise<string> {
 		if (slideKind(file.displayName, file.contentType) === "other") return "";
 		try {
-			const { bytes, contentType } = await this.plugin.canvas.download(file);
+			const { bytes, contentType } = await this.plugin.lms().download(file);
 			return (await extractSlideText(file.displayName, bytes, { loadPdfJs: () => loadPdfJs() as Promise<PdfJsLike> }, contentType)) ?? "";
 		} catch (err) {
 			new Notice(`Could not read ${file.displayName}: ${(err as Error).message}`, 6000);

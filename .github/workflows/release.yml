@@ -2,6 +2,10 @@ name: Release
 
 # Builds the plugin from source on a version tag (e.g. `0.1.1`), attests the provenance
 # of the artifacts, and publishes a GitHub release with the three files Obsidian installs.
+#
+# Beta channel: a tag like `0.3.1-beta.1` must match `manifest-beta.json` (manifest.json keeps the
+# stable version, so the community store never offers a beta). The release is marked as a
+# pre-release and its manifest.json asset is manifest-beta.json, which is what BRAT installs.
 # The Obsidian community directory rebuilds the plugin from the lockfile and compares it
 # with the release asset, so releases must come from here, not from a local build.
 
@@ -9,6 +13,7 @@ on:
   push:
     tags:
       - "[0-9]+.[0-9]+.[0-9]+"
+      - "[0-9]+.[0-9]+.[0-9]+-*"
 
 permissions:
   contents: write
@@ -28,13 +33,27 @@ jobs:
 
       - run: npm ci
 
-      - name: Check that the tag matches manifest.json
+      - name: Check that the tag matches the manifest
         run: |
-          version=$(node -p "require('./manifest.json').version")
-          if [ "$version" != "${GITHUB_REF_NAME}" ]; then
-            echo "manifest.json version ($version) does not match tag (${GITHUB_REF_NAME})" >&2
-            exit 1
-          fi
+          case "${GITHUB_REF_NAME}" in
+            *-*)
+              version=$(node -p "require('./manifest-beta.json').version")
+              if [ "$version" != "${GITHUB_REF_NAME}" ]; then
+                echo "manifest-beta.json version ($version) does not match tag (${GITHUB_REF_NAME})" >&2
+                exit 1
+              fi
+              # The beta's manifest is the one attached to the release (and installed by BRAT).
+              cp manifest-beta.json manifest.json
+              echo "PRERELEASE=--prerelease" >> "$GITHUB_ENV"
+              ;;
+            *)
+              version=$(node -p "require('./manifest.json').version")
+              if [ "$version" != "${GITHUB_REF_NAME}" ]; then
+                echo "manifest.json version ($version) does not match tag (${GITHUB_REF_NAME})" >&2
+                exit 1
+              fi
+              ;;
+          esac
 
       - run: npm test
 
@@ -54,8 +73,8 @@ jobs:
           notes="release-notes/${GITHUB_REF_NAME}.md"
           if [ -f "$notes" ]; then
             gh release create "${GITHUB_REF_NAME}" main.js manifest.json styles.css \
-              --title "${GITHUB_REF_NAME}" --notes-file "$notes"
+              --title "${GITHUB_REF_NAME}" --notes-file "$notes" $PRERELEASE
           else
             gh release create "${GITHUB_REF_NAME}" main.js manifest.json styles.css \
-              --title "${GITHUB_REF_NAME}" --generate-notes
+              --title "${GITHUB_REF_NAME}" --generate-notes $PRERELEASE
           fi

@@ -2,6 +2,7 @@
 // who am I, my courses, recent files (from the Files area and from Modules), and downloads.
 
 import { header, type HttpRequest } from "./http";
+import type { CourseFilesProvider } from "./lms";
 
 export interface CanvasCourse {
 	id: number;
@@ -101,7 +102,9 @@ export interface ModulePage {
 	title: string;
 }
 
-export class CanvasClient {
+export class CanvasClient implements CourseFilesProvider {
+	readonly kind = "canvas" as const;
+
 	constructor(
 		private getBaseUrl: () => string,
 		private getToken: () => string,

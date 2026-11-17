@@ -421,3 +421,123 @@
 	overflow-y: auto;
 	font-size: var(--font-ui-small);
 }
+
+.lc-timestamp:focus-visible {
+	outline: 2px solid var(--interactive-accent);
+	outline-offset: 1px;
+	border-radius: var(--radius-s);
+}
+
+/* 0.3.0: report a problem */
+.lc-report-link {
+	margin-left: var(--size-4-2);
+	font-weight: var(--font-semibold);
+}
+
+.lc-report-modal .lc-report-title {
+	width: 100%;
+	margin-bottom: var(--size-4-2);
+}
+
+.lc-report-modal .lc-report-body {
+	width: 100%;
+	min-height: 18em;
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-smaller);
+}
+
+/* 0.3.0: setup checklist */
+.lc-setup-rec {
+	margin-bottom: var(--size-4-3);
+	font-size: var(--font-ui-small);
+}
+
+.lc-setup-list {
+	list-style: none;
+	padding: 0;
+	margin: 0;
+}
+
+.lc-setup-row {
+	display: flex;
+	align-items: flex-start;
+	gap: var(--size-4-2);
+	padding: var(--size-4-2) 0;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.lc-setup-icon {
+	flex: 0 0 auto;
+	padding-top: 2px;
+}
+
+.lc-setup-ok {
+	color: var(--color-green);
+}
+
+.lc-setup-missing {
+	color: var(--color-orange);
+}
+
+.lc-setup-optional,
+.lc-setup-checking {
+	color: var(--text-muted);
+}
+
+.lc-setup-body {
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+.lc-setup-label {
+	font-weight: var(--font-semibold);
+}
+
+.lc-setup-status {
+	font-size: var(--font-ui-small);
+	color: var(--text-muted);
+	overflow-wrap: anywhere;
+}
+
+.lc-setup-actions {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: flex-end;
+	gap: var(--size-2-2);
+	max-width: 45%;
+}
+
+.lc-survey {
+	margin-top: var(--size-4-4);
+	padding: var(--size-4-2);
+	border-radius: var(--radius-m);
+	background: var(--background-secondary);
+}
+
+.lc-survey-options {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--size-2-2);
+	margin: var(--size-4-2) 0;
+}
+
+/* 0.3.0: panel */
+.lc-setup-hint {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--size-4-2);
+	padding: var(--size-4-2);
+	border-radius: var(--radius-m);
+	background: var(--background-secondary);
+	font-size: var(--font-ui-small);
+}
+
+.lc-setup-hint.is-hidden {
+	display: none;
+}
+
+.lc-url-input {
+	width: 100%;
+}

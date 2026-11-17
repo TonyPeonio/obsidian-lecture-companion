@@ -1,4 +1,5 @@
-import { type App, Modal, Notice } from "obsidian";
+import { type App, Modal } from "obsidian";
+import { LcNotice as Notice } from "./report-modal";
 import type { NoteEntry } from "./core/split";
 import { meetingCheckbox } from "./import";
 import type LectureCompanionPlugin from "./main";

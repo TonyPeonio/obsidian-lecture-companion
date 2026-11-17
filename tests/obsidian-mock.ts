@@ -23,3 +23,6 @@ export async function loadPdfJs(): Promise<never> {
 export async function requestUrl(): Promise<never> {
 	throw new Error("requestUrl is not available in tests");
 }
+export function getLanguage(): string { return "en"; }
+export function requireApiVersion(): boolean { return true; }
+export const apiVersion = "1.13.0";

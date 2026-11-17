@@ -1,10 +1,14 @@
-import { type App, ItemView, MarkdownRenderer, Modal, Notice, setIcon, type WorkspaceLeaf } from "obsidian";
+import { type App, ItemView, MarkdownRenderer, Modal, setIcon, type WorkspaceLeaf } from "obsidian";
+import { LcNotice as Notice } from "./report-modal";
 import type { TranscriptSegment } from "./core/audio/pipeline";
 import { formatTimestamp, SECTION_MY_NOTES, toISODate } from "./core/notes";
 import { MARK_LABELS } from "./core/transcript";
 import { decodeAudioFile } from "./recorder";
 import type LectureCompanionPlugin from "./main";
 import type { ServerState } from "./core/whisper/server";
+import { locateWhisperServer } from "./core/whisper/locate";
+import { nodeLocateDeps } from "./node/deps";
+import { t } from "./i18n";
 
 export const VIEW_TYPE = "lecture-companion-view";
 
@@ -22,6 +26,9 @@ export class LectureView extends ItemView {
 	private fileBtn!: HTMLButtonElement;
 	private pasteBtn!: HTMLButtonElement;
 	private noteBtn!: HTMLButtonElement;
+	private urlBtn!: HTMLButtonElement;
+	private pullBtn!: HTMLButtonElement;
+	private setupHint!: HTMLElement;
 	private importantBtn!: HTMLButtonElement;
 	private confusingBtn!: HTMLButtonElement;
 	private catchUpBtn!: HTMLButtonElement;
@@ -69,65 +76,72 @@ export class LectureView extends ItemView {
 
 		// Toolbar
 		const bar = root.createDiv({ cls: "lc-toolbar" });
-		this.courseInput = bar.createEl("input", { cls: "lc-course", attr: { list: "lc-course-list", placeholder: "Course or meeting", spellcheck: "false" } });
+		this.courseInput = bar.createEl("input", { cls: "lc-course", attr: { list: "lc-course-list", placeholder: t("panel.coursePlaceholder"), spellcheck: "false", "aria-label": t("panel.courseLabel") } });
 		this.courseList = bar.createEl("datalist", { attr: { id: "lc-course-list" } });
-		this.dateInput = bar.createEl("input", { cls: "lc-date", type: "date" });
+		this.dateInput = bar.createEl("input", { cls: "lc-date", type: "date", attr: { "aria-label": t("panel.dateLabel") } });
 		this.dateInput.value = toISODate();
-		const meetingLabel = bar.createEl("label", { cls: "lc-meeting", attr: { "aria-label": "A meeting, not a class: no Canvas slides, filed under the meeting folder, summary lists decisions and action items" } });
+		const meetingLabel = bar.createEl("label", { cls: "lc-meeting", attr: { "aria-label": t("panel.meetingHint") } });
 		this.meetingBox = meetingLabel.createEl("input", { type: "checkbox" });
-		meetingLabel.appendText(" Meeting");
+		meetingLabel.appendText(t("panel.meeting"));
 		this.courseInput.addEventListener("input", () => this.syncMeeting());
 		this.meetingBox.addEventListener("change", () => {
 			this.meetingTouched = true;
 			this.syncMeeting();
 		});
 
-		const buttons = bar.createDiv({ cls: "lc-buttons" });
-		this.recordBtn = iconButton(buttons, "mic", "Start recording", () => void this.startRecording());
+		const buttons = bar.createDiv({ cls: "lc-buttons", attr: { role: "toolbar", "aria-label": t("panel.title") } });
+		this.recordBtn = iconButton(buttons, "mic", t("panel.record"), () => void this.startRecording());
 		this.recordBtn.addClass("mod-cta");
-		this.pauseBtn = iconButton(buttons, "pause", "Pause", () => this.togglePause());
-		this.stopBtn = iconButton(buttons, "square", "Stop and write the note", () => void this.stopRecording());
-		this.importantBtn = iconButton(buttons, "star", "Mark this moment as important (⭐ in the transcript; the summary gives it priority)", () => this.plugin.markMoment("important"));
-		this.confusingBtn = iconButton(buttons, "help-circle", "Mark this moment as confusing (❓ in the transcript; the summary explains it more thoroughly)", () => this.plugin.markMoment("confusing"));
-		this.catchUpBtn = iconButton(buttons, "history", "Catch me up: summarize the last few minutes", () => void this.catchUp());
-		this.newBtn = iconButton(buttons, "file-plus", "New recording (clear the panel for the next class)", () => this.newRecording());
+		this.pauseBtn = iconButton(buttons, "pause", t("panel.pause"), () => this.togglePause());
+		this.stopBtn = iconButton(buttons, "square", t("panel.stop"), () => void this.stopRecording());
+		this.importantBtn = iconButton(buttons, "star", t("panel.important"), () => this.plugin.markMoment("important"));
+		this.confusingBtn = iconButton(buttons, "help-circle", t("panel.confusing"), () => this.plugin.markMoment("confusing"));
+		this.catchUpBtn = iconButton(buttons, "history", t("panel.catchUp"), () => void this.catchUp());
+		this.newBtn = iconButton(buttons, "file-plus", t("panel.new"), () => this.newRecording());
 		this.fileInput = root.createEl("input", { type: "file", cls: "lc-file-input", attr: { accept: "audio/*,video/*,.webm,.m4a,.mp3,.wav,.ogg,.opus,.flac,.aac,.mp4" } });
 		this.fileInput.addEventListener("change", () => void this.transcribeChosenFile());
-		this.fileBtn = iconButton(buttons, "file-audio", "Transcribe an audio file (a recording you already have)", () => this.pickAudioFile());
-		this.pasteBtn = iconButton(buttons, "clipboard-paste", "Paste notes you already have (text) and turn them into a lecture", () => void this.pasteNotes());
-		this.noteBtn = iconButton(buttons, "file-input", "Import the open note as a lecture", () => void this.plugin.importActiveNote());
-		iconButton(buttons, "download", "Pull slides from Canvas for this date", () => void this.pullSlides());
-		iconButton(buttons, "sparkles", "Summarize", () => void this.summarize());
-		iconButton(buttons, "file-text", "Open lecture note", () => void this.openNote());
-		iconButton(buttons, "message-circle", "Ask about this lecture (Local Vault Agent)", () => this.askAboutLecture());
+		this.fileBtn = iconButton(buttons, "file-audio", t("panel.file"), () => this.pickAudioFile());
+		this.urlBtn = iconButton(buttons, "link", t("panel.url"), () => this.pickUrl());
+		this.pasteBtn = iconButton(buttons, "clipboard-paste", t("panel.paste"), () => void this.pasteNotes());
+		this.noteBtn = iconButton(buttons, "file-input", t("panel.importNote"), () => void this.plugin.importActiveNote());
+		this.pullBtn = iconButton(buttons, "download", t("panel.pull"), () => void this.pullSlides());
+		iconButton(buttons, "sparkles", t("panel.summarize"), () => void this.summarize());
+		iconButton(buttons, "file-text", t("panel.openNote"), () => void this.openNote());
+		iconButton(buttons, "message-circle", t("panel.ask"), () => this.askAboutLecture());
 
 		// Status
 		const status = root.createDiv({ cls: "lc-status" });
 		this.serverPill = status.createSpan({ cls: "lc-pill" });
 		this.statusText = status.createSpan({ cls: "lc-status-text" });
 		const meterRow = root.createDiv({ cls: "lc-meter-row" });
-		meterRow.createSpan({ text: "Audio", cls: "lc-label" });
-		this.levelMeter = meterRow.createEl("progress", { cls: "lc-level", attr: { max: "1", value: "0" } });
+		meterRow.createSpan({ text: t("panel.audio"), cls: "lc-label" });
+		this.levelMeter = meterRow.createEl("progress", { cls: "lc-level", attr: { max: "1", value: "0", "aria-label": t("panel.audioLevel") } });
 		const progressRow = root.createDiv({ cls: "lc-progress-row" });
-		this.progressBar = progressRow.createEl("progress", { cls: "lc-progress", attr: { max: "1", value: "0" } });
-		this.progressText = progressRow.createSpan({ cls: "lc-progress-text" });
-		this.errorEl = root.createDiv({ cls: "lc-error" });
+		this.progressBar = progressRow.createEl("progress", { cls: "lc-progress", attr: { max: "1", value: "0", "aria-label": t("panel.progress") } });
+		this.progressText = progressRow.createSpan({ cls: "lc-progress-text", attr: { "aria-live": "polite" } });
+		this.errorEl = root.createDiv({ cls: "lc-error", attr: { role: "alert" } });
+		this.setupHint = root.createDiv({ cls: "lc-setup-hint is-hidden" });
+		this.setupHint.createSpan({ text: t("panel.setupHint") });
+		const hintButtons = this.setupHint.createDiv({ cls: "lc-buttons" });
+		hintButtons.createEl("button", { text: t("panel.setupButton"), cls: "mod-cta" }).addEventListener("click", () => this.plugin.openSetup());
+		hintButtons.createEl("button", { text: t("setup.trySample") }).addEventListener("click", () => void this.plugin.createSample());
+		void this.checkSetup();
 
 		// Catch-up box (hidden until used)
 		this.catchUpEl = root.createDiv({ cls: "lc-catchup is-hidden" });
 		const catchUpHead = this.catchUpEl.createDiv({ cls: "lc-catchup-head" });
-		catchUpHead.createSpan({ text: "Catch-up", cls: "lc-label" });
+		catchUpHead.createSpan({ text: t("panel.catchUpTitle"), cls: "lc-label" });
 		const catchUpActions = catchUpHead.createDiv({ cls: "lc-buttons" });
-		iconButton(catchUpActions, "file-plus-2", "Add to My notes", () => void this.addCatchUpToNotes());
-		iconButton(catchUpActions, "x", "Close", () => this.closeCatchUp());
-		this.catchUpBody = this.catchUpEl.createDiv({ cls: "lc-catchup-body markdown-rendered" });
+		iconButton(catchUpActions, "file-plus-2", t("panel.catchUpAdd"), () => void this.addCatchUpToNotes());
+		iconButton(catchUpActions, "x", t("panel.close"), () => this.closeCatchUp());
+		this.catchUpBody = this.catchUpEl.createDiv({ cls: "lc-catchup-body markdown-rendered", attr: { "aria-live": "polite" } });
 
 		// Transcript + summary
 		const body = root.createDiv({ cls: "lc-body" });
-		body.createEl("h5", { text: "Transcript", cls: "lc-heading" });
-		this.transcriptEl = body.createDiv({ cls: "lc-transcript" });
-		body.createEl("h5", { text: "Summary", cls: "lc-heading" });
-		this.summaryEl = body.createDiv({ cls: "lc-summary markdown-rendered" });
+		body.createEl("h5", { text: t("panel.transcript"), cls: "lc-heading" });
+		this.transcriptEl = body.createDiv({ cls: "lc-transcript", attr: { role: "log", "aria-label": t("panel.transcript"), tabindex: "0" } });
+		body.createEl("h5", { text: t("panel.summary"), cls: "lc-heading" });
+		this.summaryEl = body.createDiv({ cls: "lc-summary markdown-rendered", attr: { "aria-label": t("panel.summary"), tabindex: "0" } });
 
 		const session = this.plugin.session;
 		this.unsubscribe.push(
@@ -268,6 +282,45 @@ export class LectureView extends ItemView {
 		this.plugin.askAboutLecture(target.path);
 	}
 
+	/** Shows the setup hint while whisper.cpp is missing (and no remote server is set). */
+	async checkSetup(): Promise<void> {
+		const s = this.plugin.settings;
+		const ok = !!s.remoteWhisperUrl || !!(await locateWhisperServer(s.whisperBinaryPath, nodeLocateDeps()).catch(() => null));
+		this.setupHint.toggleClass("is-hidden", ok);
+	}
+
+	/** Asks for a link to a media file, downloads it and transcribes it like a picked file. */
+	pickUrl(): void {
+		if (this.plugin.session.isBusy) {
+			new Notice("Wait for the current session to finish.");
+			return;
+		}
+		new UrlModal(this.app, (url) => void this.transcribeUrl(url)).open();
+	}
+
+	private async transcribeUrl(url: string): Promise<void> {
+		const course = this.courseInput.value.trim();
+		if (!course) {
+			new Notice("Type or choose a course first.");
+			this.courseInput.focus();
+			return;
+		}
+		const notice = new Notice("…", 0);
+		try {
+			const media = await this.plugin.downloadMedia(url, (m) => notice.setMessage(m));
+			notice.setMessage(`Decoding ${media.name}…`);
+			await this.applyMeeting(course);
+			const pcm = await decodeAudioFile(media.bytes);
+			notice.hide();
+			this.rebuildTranscript();
+			const target = await this.plugin.session.transcribeAudio(course, this.dateInput.value || toISODate(), pcm, media);
+			if (target) new Notice(`Note written: ${target.path}`);
+		} catch (err) {
+			notice.hide();
+			new Notice(`Could not transcribe the link: ${(err as Error).message}`, 10_000);
+		}
+	}
+
 	/** Opens the OS file picker for an existing recording (used by the panel button and the command). */
 	pickAudioFile(): void {
 		if (this.plugin.session.isBusy) {
@@ -395,6 +448,9 @@ export class LectureView extends ItemView {
 		this.fileBtn.toggleClass("is-hidden", live || session.status === "summarizing");
 		this.pasteBtn.toggleClass("is-hidden", live || session.status === "summarizing");
 		this.noteBtn.toggleClass("is-hidden", live || session.status === "summarizing");
+		this.urlBtn.toggleClass("is-hidden", live || session.status === "summarizing");
+		// Without a course site there is nothing to pull: the button goes away instead of nagging.
+		this.pullBtn.toggleClass("is-hidden", !this.plugin.lms().configured);
 		this.pauseBtn.toggleClass("is-hidden", !(session.status === "recording" || session.status === "paused"));
 		const capturing = session.status === "recording" || session.status === "paused";
 		this.importantBtn.toggleClass("is-hidden", !capturing);
@@ -402,7 +458,7 @@ export class LectureView extends ItemView {
 		this.catchUpBtn.toggleClass("is-hidden", !capturing);
 		this.stopBtn.toggleClass("is-hidden", !(session.status === "recording" || session.status === "paused"));
 		setIcon(this.pauseBtn, session.status === "paused" ? "play" : "pause");
-		this.pauseBtn.setAttribute("aria-label", session.status === "paused" ? "Resume" : "Pause");
+		this.pauseBtn.setAttribute("aria-label", session.status === "paused" ? t("panel.resume") : t("panel.pause"));
 		this.courseInput.disabled = live;
 		this.dateInput.disabled = live;
 		this.syncMeeting();
@@ -450,7 +506,7 @@ export class LectureView extends ItemView {
 			this.renderedSegments++;
 		}
 		if (this.renderedSegments === 0) {
-			this.transcriptEl.createEl("p", { cls: "lc-placeholder", text: "The transcript appears here while you record." });
+			this.transcriptEl.createEl("p", { cls: "lc-placeholder", text: t("panel.transcriptPlaceholder") });
 		} else {
 			this.transcriptEl.querySelector(".lc-placeholder")?.remove();
 		}
@@ -494,42 +550,24 @@ function iconButton(parent: HTMLElement, icon: string, label: string, onClick: (
 function serverLabel(s: ServerState): string {
 	switch (s.status) {
 		case "ready":
-			return "Whisper ready";
+			return t("server.ready");
 		case "starting":
-			return "Loading model…";
+			return t("server.starting");
 		case "remote":
-			return "Whisper (remote)";
+			return t("server.remote");
 		case "error":
-			return "Whisper error";
+			return t("server.error");
 		default:
-			return "Whisper stopped";
+			return t("server.stopped");
 	}
 }
 
+const STATUS_KEYS = { starting: "status.starting", recording: "status.recording", paused: "status.paused", transcribing: "status.transcribing", finishing: "status.finishing", matching: "status.matching", summarizing: "status.summarizing", done: "status.done", error: "status.error" } as const;
+
 function statusLabel(status: string, course: string, date: string): string {
-	const where = course ? ` · ${course} ${date}` : "";
-	switch (status) {
-		case "starting":
-			return `Starting${where}`;
-		case "recording":
-			return `Recording${where}`;
-		case "paused":
-			return `Paused${where}`;
-		case "transcribing":
-			return `Transcribing file${where}`;
-		case "finishing":
-			return `Finishing transcript${where}`;
-		case "matching":
-			return `Matching slides${where}`;
-		case "summarizing":
-			return `Summarizing${where}`;
-		case "done":
-			return `Done${where}`;
-		case "error":
-			return `Error${where}`;
-		default:
-			return "Ready";
-	}
+	const key = STATUS_KEYS[status as keyof typeof STATUS_KEYS];
+	if (!key) return t("status.ready");
+	return `${t(key)}${course ? ` · ${course} ${date}` : ""}`;
 }
 
 class PasteModal extends Modal {
@@ -577,5 +615,40 @@ class PasteModal extends Modal {
 		this.resolve?.(text);
 		this.resolve = undefined;
 		this.close();
+	}
+}
+
+class UrlModal extends Modal {
+	constructor(
+		app: App,
+		private onUrl: (url: string) => void,
+	) {
+		super(app);
+	}
+
+	onOpen(): void {
+		this.titleEl.setText(t("cmd.transcribeUrl"));
+		this.contentEl.createEl("p", {
+			cls: "lc-picker-hint",
+			text: "Paste a direct link to an audio or video file: a lecture-capture download link, a podcast episode, an .mp4 or .mp3 on a course page. Pages that only play video in the browser (YouTube, most lecture-capture players) do not give such a link; download the recording there and use Transcribe an audio file, or record the computer's audio while it plays. Uses the course and date in the panel.",
+		});
+		const input = this.contentEl.createEl("input", { type: "url", cls: "lc-url-input", attr: { placeholder: "https://…/lecture.mp4", "aria-label": "Link to an audio or video file", spellcheck: "false" } });
+		const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+		const go = () => {
+			const url = input.value.trim();
+			if (!url) return;
+			this.close();
+			this.onUrl(url);
+		};
+		buttons.createEl("button", { text: "Download and transcribe", cls: "mod-cta" }).addEventListener("click", go);
+		buttons.createEl("button", { text: "Cancel" }).addEventListener("click", () => this.close());
+		input.addEventListener("keydown", (e) => {
+			if (e.key === "Enter") go();
+		});
+		window.setTimeout(() => input.focus(), 0);
+	}
+
+	onClose(): void {
+		this.contentEl.empty();
 	}
 }

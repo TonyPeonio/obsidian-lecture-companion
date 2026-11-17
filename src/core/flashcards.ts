@@ -3,7 +3,7 @@
 // plugin's single-line format). Pure functions plus one thin call through the Ollama client.
 
 import { sectionBody } from "./notes";
-import type { ChatMessage, OllamaClient } from "./ollama";
+import type { ChatClient, ChatMessage } from "./ollama";
 import { fitToContext, stripThinkTags, type SummaryConfig } from "./summarize";
 
 export const SECTION_FLASHCARDS = "Flashcards";
@@ -114,7 +114,7 @@ export function renderFlashcards(cards: Flashcard[]): string {
  * One model call (temperature 0.2, thinking off) that answers the summary's review questions
  * from the transcript. Empty when the summary has no questions or none could be answered.
  */
-export async function generateFlashcards(client: OllamaClient, cfg: SummaryConfig, input: FlashcardInput, signal?: AbortSignal): Promise<Flashcard[]> {
+export async function generateFlashcards(client: ChatClient, cfg: SummaryConfig, input: FlashcardInput, signal?: AbortSignal): Promise<Flashcard[]> {
 	const questions = extractReviewQuestions(input.summary);
 	if (questions.length === 0 || !input.transcript.trim()) return [];
 	const reply = await client.chat({

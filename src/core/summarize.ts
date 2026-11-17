@@ -1,5 +1,5 @@
 import { tfidfSimilarities } from "./match";
-import type { ChatMessage, OllamaClient } from "./ollama";
+import type { ChatClient, ChatMessage } from "./ollama";
 import { hasMarks, hasQuestions } from "./transcript";
 
 /**
@@ -32,6 +32,14 @@ export interface SummaryInput {
 	source?: "transcript" | "notes";
 	/** A meeting (work, club) is summarized as decisions and action items instead of course material. */
 	kind?: "lecture" | "meeting";
+	/** Write the summary in this language (empty: the lecture's language). */
+	language?: string;
+}
+
+/** The instruction that sets the output language, or "" for the lecture's own language. */
+export function languageInstruction(language: string | undefined): string {
+	const l = language?.trim();
+	return l ? `Write your whole answer in ${l}, whatever language the source is in; keep names, formulas and [mm:ss] citations as they are.` : "";
 }
 
 export interface SummaryConfig {
@@ -212,7 +220,7 @@ export function buildSummaryMessages(input: SummaryInput, numCtx: number): ChatM
 	if (input.extraInstructions?.trim()) parts.push("", meeting ? "## Additional instructions" : "## Additional instructions from the student", "", input.extraInstructions.trim());
 	const source = input.source ?? "transcript";
 	const hints = source === "transcript" ? transcriptHints(fitted.transcript) : "";
-	const system = meeting ? meetingPrompt(source) : systemPrompt(source);
+	const system = [meeting ? meetingPrompt(source) : systemPrompt(source), languageInstruction(input.language)].filter(Boolean).join("\n");
 	return [
 		{ role: "system", content: hints ? `${system}\n${hints}` : system },
 		{ role: "user", content: parts.join("\n") },
@@ -220,7 +228,7 @@ export function buildSummaryMessages(input: SummaryInput, numCtx: number): ChatM
 }
 
 export async function summarizeLecture(
-	client: OllamaClient,
+	client: ChatClient,
 	cfg: SummaryConfig,
 	input: SummaryInput,
 	onDelta?: (text: string) => void,

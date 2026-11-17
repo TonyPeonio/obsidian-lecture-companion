@@ -1,4 +1,5 @@
-import { type App, Modal, Notice } from "obsidian";
+import { type App, Modal } from "obsidian";
+import { LcNotice as Notice } from "./report-modal";
 import type { RankedSlide } from "./core/match";
 
 /** Lets the user confirm which decks belong to a lecture. Resolves with the chosen decks, or null when dismissed. */
@@ -65,7 +66,7 @@ export class SlidePickerModal extends Modal {
 				btn.addEventListener("click", () => {
 					btn.disabled = true;
 					void this.onAutoAccept?.(mode)
-						.then(() => new Notice(`${done} Change this under Settings → Canvas → Match slides to the lecture.`, 8000))
+						.then(() => new Notice(`${done} Change this under Settings → Course files → Match slides to the lecture.`, 8000))
 						.catch((err: unknown) => new Notice(`Could not save the setting: ${(err as Error).message}`, 8000))
 						.finally(() => this.finish(this.selected()));
 				});

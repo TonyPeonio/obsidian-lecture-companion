@@ -1,4 +1,6 @@
 import type { AudioSource } from "./core/audio/sources";
+import type { LmsKind } from "./core/lms";
+export type LlmProvider = "ollama" | "openai";
 export type NoteMode = "per-lecture" | "per-course-section";
 export type ThinkingMode = "auto" | "on" | "off";
 /** ask = show the picker; auto = attach without asking when the match is clear; always = attach the top match without asking; off = never match. */
@@ -96,6 +98,25 @@ export interface LectureCompanionSettings {
 	classSchedule: string;
 	/** Minutes before the start to ask. */
 	reminderLeadMinutes: number;
+	// 0.3.0
+	/** Where slides come from: none, Canvas or Moodle. */
+	lms: LmsKind;
+	moodleUrl: string;
+	moodleToken: string;
+	/** Ollama (default) or an OpenAI-compatible server (LM Studio, llama.cpp, Jan, vLLM). */
+	llmProvider: LlmProvider;
+	openaiUrl: string;
+	openaiModel: string;
+	/** Optional; most local servers need none. */
+	openaiKey: string;
+	/** Language of summaries, flashcards and review notes; empty = the lecture's language. */
+	summaryLanguage: string;
+	/** Target language of "Translate the transcript". */
+	translateLanguage: string;
+	/** The setup checklist was shown once. */
+	setupShown: boolean;
+	/** The one-question survey was answered or dismissed. */
+	surveyDone: boolean;
 	/** Set once the course notes from before 0.1.19 (`<folder>/<course>.md`) were moved into their course folders. */
 	courseNotesInFolders: boolean;
 }
@@ -152,7 +173,32 @@ export const DEFAULT_SETTINGS: LectureCompanionSettings = {
 	classRemindersCanvas: true,
 	classSchedule: "",
 	reminderLeadMinutes: 2,
+	lms: "none",
+	moodleUrl: "",
+	moodleToken: "",
+	llmProvider: "ollama",
+	openaiUrl: "http://localhost:1234",
+	openaiModel: "",
+	openaiKey: "",
+	summaryLanguage: "",
+	translateLanguage: "English",
+	setupShown: false,
+	surveyDone: false,
 };
+
+/**
+ * Settings saved by an earlier version, with defaults filled in. Before 0.3.0 Canvas was the only
+ * course site, so a saved Canvas URL and token mean "Canvas"; and an existing install has seen
+ * the plugin already, so it skips the first-run checklist.
+ */
+export function migrateSettings(saved: Partial<LectureCompanionSettings> | null): LectureCompanionSettings {
+	const out: LectureCompanionSettings = { ...DEFAULT_SETTINGS, ...(saved ?? {}) };
+	if (saved && saved.lms === undefined) {
+		out.lms = saved.canvasUrl && saved.canvasToken ? "canvas" : "none";
+		if (saved.setupShown === undefined && (saved.whisperBinaryPath !== undefined || saved.canvasUrl)) out.setupShown = true;
+	}
+	return out;
+}
 
 /** Parses the `key = path` overrides. Keys are matched case-insensitively against course id, name and code. */
 export function parseCourseNotes(text: string): { key: string; path: string }[] {

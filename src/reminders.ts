@@ -28,7 +28,8 @@ export class ClassReminders {
 	async todaysClasses(now = new Date()): Promise<ClassOccurrence[]> {
 		const s = this.plugin.settings;
 		const out = occurrencesOn(parseWeeklySchedule(s.classSchedule).classes, now);
-		if (s.classRemindersCanvas && this.plugin.canvas.configured) {
+		const lms = this.plugin.lms();
+		if (s.classRemindersCanvas && lms.configured && lms.calendarEvents) {
 			const today = toISODate(now);
 			// A new day fetches again (after a failure, at most every 10 minutes); the same day every 3 hours.
 			const age = Date.now() - this.canvasFetchedAt;
@@ -38,7 +39,7 @@ export class ClassReminders {
 				try {
 					if (this.plugin.courses.length === 0) await this.plugin.refreshCourses();
 					const byCode = new Map(this.plugin.courses.map((c) => [`course_${c.id}`, vaultCourseName(s, c)]));
-					const events = await this.plugin.canvas.calendarEvents([...this.plugin.courses.map((c) => c.id)], today, today);
+					const events = await lms.calendarEvents([...this.plugin.courses.map((c) => c.id)], today, today);
 					this.canvasClasses = classesFromCanvas(events, (code) => byCode.get(code));
 					this.canvasFetchedFor = today;
 				} catch {

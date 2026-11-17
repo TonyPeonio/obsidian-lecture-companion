@@ -40,6 +40,13 @@ export function defaultThreads(): number {
 export interface GpuInfo {
 	vendor: "nvidia" | "apple" | "none";
 	name?: string;
+	/** Dedicated memory of an NVIDIA card. */
+	vramGb?: number;
+}
+
+/** Total RAM in GB. */
+export function ramGb(): number {
+	return os.totalmem() / 1024 ** 3;
 }
 
 /** NVIDIA via nvidia-smi (Windows/Linux); Apple silicon uses Metal through the Homebrew build automatically. */
@@ -50,7 +57,7 @@ export async function detectGpu(): Promise<GpuInfo> {
 	const name = await new Promise<string>((resolve) => {
 		let out = "";
 		try {
-			const child = spawn(smi, ["--query-gpu=name", "--format=csv,noheader"], { windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
+			const child = spawn(smi, ["--query-gpu=name,memory.total", "--format=csv,noheader,nounits"], { windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
 			child.stdout?.on("data", (d: Buffer) => (out += d.toString()));
 			child.on("error", () => resolve(""));
 			child.on("close", () => resolve(out.split(/\r?\n/)[0]?.trim() ?? ""));
@@ -58,7 +65,10 @@ export async function detectGpu(): Promise<GpuInfo> {
 			resolve("");
 		}
 	});
-	return name ? { vendor: "nvidia", name } : { vendor: "none" };
+	// "NVIDIA GeForce RTX 4070, 12282" (MiB)
+	const [gpuName, mib] = name.split(",").map((x) => x.trim());
+	const vram = Number(mib);
+	return gpuName ? { vendor: "nvidia", name: gpuName, ...(Number.isFinite(vram) && vram > 0 ? { vramGb: vram / 1024 } : {}) } : { vendor: "none" };
 }
 
 /** Writes the installer script next to the plugin and opens it in a visible PowerShell window. */

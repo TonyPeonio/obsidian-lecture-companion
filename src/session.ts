@@ -1,7 +1,7 @@
 // One lecture: microphone → chunker → whisper pipeline → note, then an optional summary.
 // Owned by the plugin so the sidebar view can close and reopen without losing the session.
 
-import { Notice } from "obsidian";
+import { LcNotice as Notice, logError } from "./report-modal";
 import { Chunker } from "./core/audio/chunker";
 import { TranscriptionPipeline, type PipelineProgress, type TranscriptSegment } from "./core/audio/pipeline";
 import { generateFlashcards, renderFlashcards, SECTION_FLASHCARDS, type FlashcardInput } from "./core/flashcards";
@@ -201,8 +201,8 @@ export class LectureSession {
 		const text = recentText(this.segments, Math.max(this.recordedSec, this.progress.transcribedSec), minutes);
 		if (text.length < 40) throw new Error(`Not enough has been transcribed in the last ${minutes} min yet.`);
 		const settings = this.plugin.settings;
-		const out = await this.plugin.ollama.chat({
-			model: settings.ollamaModel,
+		const out = await this.plugin.llm().chat({
+			model: this.plugin.chatModel(),
 			messages: buildCatchUpMessages(this.course, minutes, text),
 			options: { num_ctx: Math.min(settings.numCtx, 8192), temperature: 0.2 },
 			keep_alive: "10m",
@@ -300,6 +300,7 @@ export class LectureSession {
 				onProgress: () => this.emit(),
 				onError: (err) => {
 					this.error = `A chunk could not be transcribed: ${err.message}`;
+					logError(this.error);
 					this.emit();
 				},
 			},
@@ -421,9 +422,9 @@ export class LectureSession {
 			const kind = this.plugin.noteKind(series);
 			const date = meta?.date ?? (target === this.target && this.date ? this.date : (/(\d{4}-\d{2}-\d{2})/.exec(target.parentHeading ?? target.path)?.[1] ?? toISODate()));
 			const text = await summarizeLecture(
-				this.plugin.ollama,
+				this.plugin.llm(),
 				{
-					model: settings.ollamaModel,
+					model: this.plugin.chatModel(),
 					numCtx: settings.numCtx,
 					temperature: 0.2,
 					think: settings.thinking === "auto" ? undefined : settings.thinking === "on",
@@ -436,6 +437,7 @@ export class LectureSession {
 					kind,
 					slideText: slideText || undefined,
 					extraInstructions: settings.summaryInstructions,
+					language: settings.summaryLanguage,
 				},
 				(delta) => {
 					this.summary += delta;
@@ -458,7 +460,7 @@ export class LectureSession {
 			}
 			// Opt-in: answer the review questions from the transcript and write them as Spaced Repetition cards.
 			if (settings.flashcards && kind === "lecture" && text) {
-				await this.writeFlashcards(target, { course: series, date, summary: text, transcript, slideText: slideText || undefined }, settings.ollamaModel, settings.numCtx, this.summaryAbort.signal);
+				await this.writeFlashcards(target, { course: series, date, summary: text, transcript, slideText: slideText || undefined }, this.plugin.chatModel(), settings.numCtx, this.summaryAbort.signal);
 			}
 			this.status = "done";
 			this.emit();
@@ -466,7 +468,10 @@ export class LectureSession {
 		} catch (err) {
 			const aborted = err instanceof Error && err.name === "AbortError";
 			this.status = aborted ? "done" : "error";
-			if (!aborted) this.error = `Summary failed: ${(err as Error).message}`;
+			if (!aborted) {
+				this.error = `Summary failed: ${(err as Error).message}`;
+				logError(this.error);
+			}
 			this.emit();
 			throw err;
 		} finally {
@@ -484,7 +489,7 @@ export class LectureSession {
 	 */
 	private async writeFlashcards(target: NoteTarget, input: FlashcardInput, model: string, numCtx: number, signal: AbortSignal): Promise<void> {
 		try {
-			const cards = await generateFlashcards(this.plugin.ollama, { model, numCtx, temperature: 0.2, think: false }, input, signal);
+			const cards = await generateFlashcards(this.plugin.llm(), { model, numCtx, temperature: 0.2, think: false }, input, signal);
 			if (cards.length === 0) {
 				new Notice("No flashcards: the model could not answer the review questions from the transcript.", 6000);
 				return;

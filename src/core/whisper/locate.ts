@@ -98,7 +98,7 @@ export function installHint(platform: string): InstallHint {
 			commandNote: "needs Homebrew",
 			url: WHISPER_RELEASES_URL,
 			guideUrl: INSTALL_GUIDE_URL,
-			text: "Install with Homebrew, or build whisper.cpp from source and paste the path to build/bin/whisper-server above.",
+			text: "Install with Homebrew (brew install whisper-cpp). On Apple silicon (M1 and later) Homebrew's build uses the GPU through Metal, which makes even the large models keep up live; nothing else to set. Or build whisper.cpp from source (Metal is on by default on macOS) and paste the path to build/bin/whisper-server above.",
 		};
 	}
 	return {

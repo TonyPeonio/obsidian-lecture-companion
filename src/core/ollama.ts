@@ -26,6 +26,14 @@ export interface ChatRequest {
 	onDelta?(content: string): void;
 }
 
+/** What summaries, flashcards, catch-up and review notes need from a chat server (Ollama or OpenAI-compatible). */
+export interface ChatClient {
+	readonly baseUrl: string;
+	version(): Promise<string>;
+	listModels(): Promise<ModelInfo[]>;
+	chat(req: ChatRequest): Promise<string>;
+}
+
 export class OllamaError extends Error {
 	constructor(
 		message: string,
@@ -40,10 +48,12 @@ export class OllamaError extends Error {
 export type FallbackRequest = (url: string, method: "GET" | "POST", body?: string) => Promise<{ status: number; text: string }>;
 type FetchLike = typeof fetch;
 
-export class OllamaClient {
+export class OllamaClient implements ChatClient {
 	constructor(
 		private getBaseUrl: () => string,
-		private fetchImpl: FetchLike = (...args) => fetch(...args),
+		// requestUrl cannot stream a response, and summaries stream token by token into the panel;
+		// fetch is used only for that, with requestUrl (the `fallback`) when fetch is blocked.
+		private fetchImpl: FetchLike,
 		private fallback?: FallbackRequest,
 	) {}
 
@@ -132,6 +142,28 @@ export class OllamaClient {
 			const r = await this.fallback(url, "GET");
 			if (r.status >= 400) throw new OllamaError(extractError(r.text, r.status), r.status);
 			return parseJson(r.text);
+		}
+	}
+
+	/**
+	 * Downloads a model (`ollama pull`), reporting progress (0..1, or -1 while Ollama is not
+	 * downloading, e.g. verifying). Needs streaming, so it uses fetch only.
+	 */
+	async pull(model: string, onProgress?: (status: string, fraction: number) => void, signal?: AbortSignal): Promise<void> {
+		let response: Response;
+		try {
+			response = await this.fetchImpl(`${this.baseUrl}/api/pull`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model, stream: true }), signal });
+		} catch (err) {
+			if (signal?.aborted) throw err;
+			throw this.unreachable(err);
+		}
+		if (!response.ok) throw new OllamaError(extractError(await response.text(), response.status), response.status);
+		if (!response.body) throw new OllamaError("Ollama returned an empty response body");
+		for await (const chunk of ndjson(response.body, signal)) {
+			if (chunk.error) throw new OllamaError(typeof chunk.error === "string" ? chunk.error : JSON.stringify(chunk.error));
+			const total = Number(chunk.total ?? 0);
+			const done = Number(chunk.completed ?? 0);
+			onProgress?.(typeof chunk.status === "string" ? chunk.status : "", total > 0 ? done / total : -1);
 		}
 	}
 

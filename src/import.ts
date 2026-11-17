@@ -2,7 +2,8 @@
 import { parseSlideMatching, type SlideMatching } from "./settings";
 // is matched against it, and the summary is written from notes + slide text.
 
-import { type App, Modal, Notice, TFile, TFolder } from "obsidian";
+import { type App, Modal, TFile, TFolder } from "obsidian";
+import { LcNotice as Notice } from "./report-modal";
 import { detectDate, extractTodos, isLectureNote, renderLectureNote, SECTION_MY_NOTES, SECTION_SLIDES, stripFrontmatter, toISODate } from "./core/notes";
 import type LectureCompanionPlugin from "./main";
 import { cleanTranscript } from "./session";
@@ -68,7 +69,7 @@ export async function importNotesAsLecture(plugin: LectureCompanionPlugin, opts:
 	const todosAdded = await plugin.addCourseTodos(course, todos);
 
 	let slides = false;
-	if (opts.matchSlides !== "off" && plugin.canvas.configured && kind === "lecture") {
+	if (opts.matchSlides !== "off" && plugin.lms().configured && kind === "lecture") {
 		const before = cleanTranscript((await plugin.vault.readSection(target, SECTION_SLIDES)) ?? "", false);
 		if (!before) {
 			await plugin.matchSlides(course, opts.date, target, notes, opts.matchSlides);

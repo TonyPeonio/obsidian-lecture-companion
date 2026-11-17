@@ -4,6 +4,7 @@
 
 import type { ChatMessage } from "./ollama";
 import { oneLineSummary, sectionBody } from "./notes";
+import { languageInstruction } from "./summarize";
 
 export interface ReviewLecture {
 	/** Vault path of the lecture note. */
@@ -97,7 +98,7 @@ export function buildReviewNote(input: ReviewInput): string {
 }
 
 /** Prompt for the overview at the top of a review note: from the lectures' summaries only. */
-export function buildReviewOverviewMessages(input: Omit<ReviewInput, "overview">, maxChars = 24_000): ChatMessage[] {
+export function buildReviewOverviewMessages(input: Omit<ReviewInput, "overview">, maxChars = 24_000, language?: string): ChatMessage[] {
 	const parts: string[] = [`Course: ${input.course}`, `Lectures from ${input.from} to ${input.to}`, ""];
 	for (const l of input.lectures) {
 		const s = [oneLineSummary(l.summary) ?? "", ...sectionBullets(l.summary, "Key points").map((p) => `- ${p}`)].filter(Boolean).join("\n");
@@ -109,7 +110,7 @@ export function buildReviewOverviewMessages(input: Omit<ReviewInput, "overview">
 		{
 			role: "system",
 			content:
-				"You help a student review for an exam. From the lecture summaries given, write an overview of what this part of the course covered: 1 short paragraph on the big picture and how the lectures connect, then 4 to 8 bullets naming the main themes a student should master, in course order. Use only what is in the summaries. Markdown, sentence case, no title, no timestamps.",
+				`You help a student review for an exam. From the lecture summaries given, write an overview of what this part of the course covered: 1 short paragraph on the big picture and how the lectures connect, then 4 to 8 bullets naming the main themes a student should master, in course order. Use only what is in the summaries. Markdown, sentence case, no title, no timestamps.${language?.trim() ? ` ${languageInstruction(language)}` : ""}`,
 		},
 		{ role: "user", content: user },
 	];

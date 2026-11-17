@@ -1,0 +1,31 @@
+name: E2E (real Obsidian)
+
+# End-to-end tests in a real Obsidian downloaded by wdio-obsidian-service: course-note migration,
+# course rename, clickable timestamps, the sample lecture and importing a note. Separate from the
+# release gate (CI + Release), so a flaky desktop session never blocks a release.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - name: Cache Obsidian downloads
+        uses: actions/cache@v4
+        with:
+          path: .obsidian-cache
+          key: obsidian-cache-${{ runner.os }}-${{ hashFiles('manifest.json') }}
+      - run: node esbuild.config.mjs production
+      - name: Run e2e tests under a virtual display
+        run: xvfb-run --auto-servernum --server-args="-screen 0 1280x1024x24" npx wdio run ./wdio.conf.mts

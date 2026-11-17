@@ -78,7 +78,6 @@ export class MicRecorder {
 	private streams: MediaStream[] = [];
 	private ctx?: AudioContext;
 	private node?: AudioWorkletNode;
-	private processor?: ScriptProcessorNode;
 	private sources: MediaStreamAudioSourceNode[] = [];
 	private mix?: GainNode;
 	private recordDest?: MediaStreamAudioDestinationNode;
@@ -141,21 +140,18 @@ export class MicRecorder {
 			cb.onLevel(rms(pcm));
 			cb.onFrame(pcm);
 		};
+		// Obsidian's Electron always has AudioWorklet. The module is loaded from a blob: URL, and
+		// from a data: URL if a content security policy blocks blob: (the deprecated
+		// ScriptProcessorNode fallback of earlier versions is gone).
+		this.workletUrl = URL.createObjectURL(new Blob([WORKLET_SOURCE], { type: "application/javascript" }));
 		try {
-			this.workletUrl = URL.createObjectURL(new Blob([WORKLET_SOURCE], { type: "application/javascript" }));
 			await ctx.audioWorklet.addModule(this.workletUrl);
-			this.node = new AudioWorkletNode(ctx, "lecture-capture", { numberOfInputs: 1, numberOfOutputs: 0, channelCount: 1, channelCountMode: "explicit" });
-			this.node.port.onmessage = (ev: MessageEvent<Float32Array>) => deliver(ev.data);
-			mix.connect(this.node);
 		} catch {
-			// Blob-URL worklets can be blocked by a content security policy; fall back to the
-			// deprecated-but-universal ScriptProcessorNode.
-			const processor = ctx.createScriptProcessor(4096, 1, 1);
-			processor.onaudioprocess = (e) => deliver(e.inputBuffer.getChannelData(0).slice());
-			mix.connect(processor);
-			processor.connect(ctx.destination);
-			this.processor = processor;
+			await ctx.audioWorklet.addModule(`data:application/javascript;base64,${btoa(WORKLET_SOURCE)}`);
 		}
+		this.node = new AudioWorkletNode(ctx, "lecture-capture", { numberOfInputs: 1, numberOfOutputs: 0, channelCount: 1, channelCountMode: "explicit" });
+		this.node.port.onmessage = (ev: MessageEvent<Float32Array>) => deliver(ev.data);
+		mix.connect(this.node);
 		if (ctx.state === "suspended") await ctx.resume();
 
 		if (options.keepAudio && typeof MediaRecorder !== "undefined") {
@@ -208,12 +204,10 @@ export class MicRecorder {
 		this.blobs = [];
 		this.node?.port.close();
 		this.node?.disconnect();
-		this.processor?.disconnect();
 		for (const s of this.sources) s.disconnect();
 		this.mix?.disconnect();
 		this.recordDest?.disconnect();
 		this.node = undefined;
-		this.processor = undefined;
 		this.sources = [];
 		this.mix = undefined;
 		this.recordDest = undefined;

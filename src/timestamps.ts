@@ -4,7 +4,8 @@
 
 import { RangeSetBuilder } from "@codemirror/state";
 import { Decoration, type DecorationSet, EditorView, ViewPlugin, type ViewUpdate } from "@codemirror/view";
-import { editorInfoField, type MarkdownPostProcessorContext, Notice, TFile } from "obsidian";
+import { editorInfoField, type MarkdownPostProcessorContext, TFile } from "obsidian";
+import { LcNotice as Notice } from "./report-modal";
 import { findTimestamps } from "./core/transcript";
 import type LectureCompanionPlugin from "./main";
 
@@ -57,6 +58,12 @@ export class TimestampLinks {
 				span.addEventListener("click", (e) => {
 					e.preventDefault();
 					e.stopPropagation();
+					void this.seek(ctx.sourcePath, m.seconds, span);
+				});
+				span.tabIndex = 0;
+				span.addEventListener("keydown", (e) => {
+					if (e.key !== "Enter" && e.key !== " ") return;
+					e.preventDefault();
 					void this.seek(ctx.sourcePath, m.seconds, span);
 				});
 				frag.append(span);

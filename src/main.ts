@@ -1,4 +1,5 @@
-import { Modal, normalizePath, Notice, Platform, Plugin, requestUrl, TFile, TFolder, type App, type TAbstractFile, type WorkspaceLeaf } from "obsidian";
+import { Modal, normalizePath, Platform, Plugin, requestUrl, TFile, TFolder, type App, type TAbstractFile, type WorkspaceLeaf } from "obsidian";
+import { LcNotice as Notice } from "./report-modal";
 import { describePull, pullSlides } from "./canvas-pull";
 import { conventionsBlock, upsertConventions } from "./core/agent-bridge";
 import { CanvasClient, resolveCourse, type CanvasCourse } from "./core/canvas";
@@ -16,14 +17,25 @@ import { ImportModal, importNotesAsLecture, listImportableNotes } from "./import
 import { groupEntriesByDate, splitEntries } from "./core/split";
 import { SplitModal, type SplitChoice } from "./split-modal";
 import { SlideMatcher } from "./slide-matcher";
-import { OllamaClient } from "./core/ollama";
+import { OllamaClient, type ChatClient } from "./core/ollama";
+import { OpenAiClient } from "./core/openai";
+import { MoodleClient } from "./core/moodle";
+import { NoLms, type CourseFilesProvider } from "./core/lms";
+import { ReportModal, setReporter } from "./report-modal";
+import { SetupModal } from "./setup";
+import { t } from "./i18n";
+import { backupPlan, backupStamp, backupsToPrune } from "./core/backup";
+import { isHttpUrl, isMediaResponse, mediaFileName } from "./core/media";
+import { buildTranslateMessages, cleanTranslation, translatedHeading, translationChunks } from "./core/translate";
+import { parseTranscript } from "./core/transcript";
+import { SAMPLE_COURSE, SAMPLE_DECK, sampleLectureNote, samplePdf } from "./core/sample";
 import { locateWhisperServer } from "./core/whisper/locate";
 import { findModel, modelPath, VAD_MODEL } from "./core/whisper/models";
 import { parseExtraArgs, WhisperServerManager, type ServerConfig, type ServerState } from "./core/whisper/server";
 import { defaultThreads, nodeLocateDeps, nodeServerDeps } from "./node/deps";
 import { convertPptxToPdf, findPptxConverter, type PptxConverter } from "./node/convert";
 import { cleanTranscript, LectureSession } from "./session";
-import { addCourseAlias, addMeeting, courseNoteOverride, DEFAULT_SETTINGS, manualCourseList, meetingList, renameCourseInSettings, setCourseAlias, vaultCourseName, type LectureCompanionSettings, type SlideMatching, setCourseHidden, visibleCourses } from "./settings";
+import { migrateSettings, addCourseAlias, addMeeting, courseNoteOverride, DEFAULT_SETTINGS, manualCourseList, meetingList, renameCourseInSettings, setCourseAlias, vaultCourseName, type LectureCompanionSettings, type SlideMatching, setCourseHidden, visibleCourses } from "./settings";
 import { LectureCompanionSettingTab } from "./settings-tab";
 import { VaultIO, type NoteTarget } from "./vault";
 import { LectureView, VIEW_TYPE } from "./view";
@@ -33,8 +45,11 @@ export default class LectureCompanionPlugin extends Plugin {
 	vault!: VaultIO;
 	http!: HttpRequest;
 	server!: WhisperServerManager;
-	canvas!: CanvasClient;
+	canvasClient!: CanvasClient;
+	moodle!: MoodleClient;
+	private noLms = new NoLms();
 	ollama!: OllamaClient;
+	openai!: OpenAiClient;
 	session!: LectureSession;
 	matcher!: SlideMatcher;
 	modelsDir = "";
@@ -71,19 +86,35 @@ export default class LectureCompanionPlugin extends Plugin {
 			() => this.serverConfigSync(),
 			(state) => this.serverListeners.forEach((l) => l(state)),
 		);
-		this.canvas = new CanvasClient(
+		this.canvasClient = new CanvasClient(
 			() => this.settings.canvasUrl,
 			() => this.settings.canvasToken,
 			this.http,
 		);
 		this.ollama = new OllamaClient(
 			() => this.settings.ollamaUrl,
-			(input, init) => fetch(input, init),
+			// Streaming summaries need fetch (requestUrl cannot stream); requestUrl below is the fallback.
+			(input, init) => window.fetch(input, init),
 			async (url, method, body) => {
 				const res = await requestUrl({ url, method, body, contentType: body === undefined ? undefined : "application/json", throw: false });
 				return { status: res.status, text: res.text };
 			},
 		);
+		this.moodle = new MoodleClient(
+			() => this.settings.moodleUrl,
+			() => this.settings.moodleToken,
+			this.http,
+		);
+		this.openai = new OpenAiClient(
+			() => this.settings.openaiUrl,
+			() => this.settings.openaiKey,
+			(input, init) => window.fetch(input, init),
+			async (url, method, body, headers) => {
+				const res = await requestUrl({ url, method, body, headers, contentType: body === undefined ? undefined : "application/json", throw: false });
+				return { status: res.status, text: res.text };
+			},
+		);
+		setReporter((summary) => new ReportModal(this.app, this, summary).open());
 		this.session = new LectureSession(this);
 		this.matcher = new SlideMatcher(this);
 		this.lectureIndex = new LectureIndex(this);
@@ -97,10 +128,10 @@ export default class LectureCompanionPlugin extends Plugin {
 		this.addRibbonIcon("mic", "Lecture Companion", () => void this.activateView());
 		this.addSettingTab(new LectureCompanionSettingTab(this.app, this));
 
-		this.addCommand({ id: "open-panel", name: "Open panel", callback: () => void this.activateView() });
+		this.addCommand({ id: "open-panel", name: t("cmd.openPanel"), callback: () => void this.activateView() });
 		this.addCommand({
 			id: "start-recording",
-			name: "Start recording",
+			name: t("cmd.startRecording"),
 			checkCallback: (checking) => {
 				if (this.session.isBusy) return false;
 				if (!checking) void this.activateView(true);
@@ -109,7 +140,7 @@ export default class LectureCompanionPlugin extends Plugin {
 		});
 		this.addCommand({
 			id: "pause-resume-recording",
-			name: "Pause or resume recording",
+			name: t("cmd.pauseResume"),
 			checkCallback: (checking) => {
 				const s = this.session.status;
 				if (s !== "recording" && s !== "paused") return false;
@@ -122,7 +153,7 @@ export default class LectureCompanionPlugin extends Plugin {
 		});
 		this.addCommand({
 			id: "stop-recording",
-			name: "Stop recording and write the note",
+			name: t("cmd.stop"),
 			checkCallback: (checking) => {
 				const s = this.session.status;
 				if (s !== "recording" && s !== "paused") return false;
@@ -137,7 +168,7 @@ export default class LectureCompanionPlugin extends Plugin {
 		});
 		this.addCommand({
 			id: "transcribe-audio-file",
-			name: "Transcribe an audio file",
+			name: t("cmd.transcribeFile"),
 			checkCallback: (checking) => {
 				if (this.session.isBusy) return false;
 				if (!checking) void this.activateView().then((view) => view?.pickAudioFile());
@@ -146,19 +177,19 @@ export default class LectureCompanionPlugin extends Plugin {
 		});
 		this.addCommand({
 			id: "pull-canvas-slides",
-			name: "Pull today's Canvas slides",
+			name: t("cmd.pullToday"),
 			callback: () => void this.pullSlidesCommand(toISODate()),
 		});
 		this.addCommand({
 			id: "pull-canvas-slides-for-date",
-			name: "Pull Canvas slides for a date…",
+			name: t("cmd.pullDate"),
 			callback: () => {
 				new DateModal(this.app, (date) => void this.pullSlidesCommand(date)).open();
 			},
 		});
 		this.addCommand({
 			id: "import-note",
-			name: "Import this note as a lecture (my notes → slides + summary)",
+			name: t("cmd.importNote"),
 			checkCallback: (checking) => {
 				const file = this.app.workspace.getActiveFile();
 				if (!(file instanceof TFile) || file.extension !== "md" || this.session.isBusy) return false;
@@ -171,7 +202,7 @@ export default class LectureCompanionPlugin extends Plugin {
 		});
 		this.addCommand({
 			id: "split-note",
-			name: "Split this note into lectures (one per date)",
+			name: t("cmd.splitNote"),
 			checkCallback: (checking) => {
 				const file = this.app.workspace.getActiveFile();
 				if (!(file instanceof TFile) || file.extension !== "md" || this.session.isBusy) return false;
@@ -181,7 +212,7 @@ export default class LectureCompanionPlugin extends Plugin {
 		});
 		this.addCommand({
 			id: "import-folder",
-			name: "Import all notes in this folder as lectures",
+			name: t("cmd.importFolder"),
 			checkCallback: (checking) => {
 				const file = this.app.workspace.getActiveFile();
 				if (!(file instanceof TFile) || this.session.isBusy) return false;
@@ -191,7 +222,7 @@ export default class LectureCompanionPlugin extends Plugin {
 		});
 		this.addCommand({
 			id: "rename-course",
-			name: "Rename a course (folder, course note, links and settings)",
+			name: t("cmd.renameCourse"),
 			callback: () => {
 				const active = this.app.workspace.getActiveFile();
 				const current = active ? this.courseOfPath(active.path) : "";
@@ -205,7 +236,7 @@ export default class LectureCompanionPlugin extends Plugin {
 		});
 		this.addCommand({
 			id: "rebuild-course-index",
-			name: "Rebuild course note links (list every lecture note under its date)",
+			name: t("cmd.rebuildIndex"),
 			callback: async () => {
 				await this.moveCourseNotesIntoFolders();
 				const courses = this.vault.coursesInFolder(this.settings.courseFolder).filter((c) => !this.isMeeting(c));
@@ -217,7 +248,7 @@ export default class LectureCompanionPlugin extends Plugin {
 		});
 		this.addCommand({
 			id: "move-todos",
-			name: "Move tasks from this note to the course TODO list",
+			name: t("cmd.moveTodos"),
 			checkCallback: (checking) => {
 				const file = this.app.workspace.getActiveFile();
 				if (!(file instanceof TFile) || file.extension !== "md") return false;
@@ -227,7 +258,7 @@ export default class LectureCompanionPlugin extends Plugin {
 		});
 		this.addCommand({
 			id: "convert-pptx-in-note",
-			name: "Convert PowerPoint decks in this note to PDF",
+			name: t("cmd.convertPptx"),
 			checkCallback: (checking) => {
 				const file = this.app.workspace.getActiveFile();
 				if (!(file instanceof TFile) || file.extension !== "md") return false;
@@ -249,7 +280,7 @@ export default class LectureCompanionPlugin extends Plugin {
 		});
 		this.addCommand({
 			id: "choose-slides",
-			name: "Choose slides for this lecture note",
+			name: t("cmd.chooseSlides"),
 			checkCallback: (checking) => {
 				const file = this.app.workspace.getActiveFile();
 				if (!(file instanceof TFile) || file.extension !== "md" || this.session.isBusy) return false;
@@ -259,7 +290,7 @@ export default class LectureCompanionPlugin extends Plugin {
 		});
 		this.addCommand({
 			id: "summarize-lecture-note",
-			name: "Summarize this lecture note",
+			name: t("cmd.summarize"),
 			checkCallback: (checking) => {
 				const file = this.app.workspace.getActiveFile();
 				if (!(file instanceof TFile) || file.extension !== "md" || this.session.isBusy) return false;
@@ -277,7 +308,7 @@ export default class LectureCompanionPlugin extends Plugin {
 		for (const kind of ["important", "confusing"] as MarkKind[]) {
 			this.addCommand({
 				id: `mark-${kind}`,
-				name: kind === "important" ? "Mark this moment as important" : "Mark this moment as confusing",
+				name: kind === "important" ? t("cmd.markImportant") : t("cmd.markConfusing"),
 				checkCallback: (checking) => {
 					const s = this.session.status;
 					if (s !== "recording" && s !== "paused") return false;
@@ -288,7 +319,7 @@ export default class LectureCompanionPlugin extends Plugin {
 		}
 		this.addCommand({
 			id: "catch-up",
-			name: "Catch me up (summarize the last minutes of the recording)",
+			name: t("cmd.catchUp"),
 			checkCallback: (checking) => {
 				const s = this.session.status;
 				if (s !== "recording" && s !== "paused") return false;
@@ -298,7 +329,7 @@ export default class LectureCompanionPlugin extends Plugin {
 		});
 		this.addCommand({
 			id: "align-slides",
-			name: "Link transcript paragraphs to slides in this note",
+			name: t("cmd.alignSlides"),
 			checkCallback: (checking) => {
 				const file = this.app.workspace.getActiveFile();
 				if (!(file instanceof TFile) || file.extension !== "md" || this.session.isBusy) return false;
@@ -308,7 +339,7 @@ export default class LectureCompanionPlugin extends Plugin {
 		});
 		this.addCommand({
 			id: "review-note",
-			name: "Make a review note (lectures in a date range)",
+			name: t("cmd.reviewNote"),
 			callback: () => {
 				const active = this.app.workspace.getActiveFile();
 				new ReviewModal(this.app, this, active ? this.courseOfPath(active.path) : "", (choice) => {
@@ -329,7 +360,7 @@ export default class LectureCompanionPlugin extends Plugin {
 		});
 		this.addCommand({
 			id: "ask-about-lecture",
-			name: "Ask about this lecture (Local Vault Agent)",
+			name: t("cmd.askLva"),
 			checkCallback: (checking) => {
 				const file = this.app.workspace.getActiveFile();
 				const path = file instanceof TFile && file.extension === "md" ? file.path : this.session.target?.path;
@@ -338,16 +369,48 @@ export default class LectureCompanionPlugin extends Plugin {
 				return true;
 			},
 		});
-		this.addCommand({ id: "start-whisper-server", name: "Start whisper-server", callback: () => void this.startServer().catch((e: Error) => new Notice(e.message, 8000)) });
-		this.addCommand({ id: "stop-whisper-server", name: "Stop whisper-server", callback: () => this.server.stop() });
-		this.addCommand({ id: "agent-conventions", name: "Add lecture conventions to AGENT.md", callback: () => void this.syncAgentConventions(true) });
+		this.addCommand({ id: "report-problem", name: t("cmd.report"), callback: () => this.openReport() });
+		this.addCommand({ id: "setup-checklist", name: t("cmd.setup"), callback: () => this.openSetup() });
+		this.addCommand({ id: "try-sample", name: t("cmd.sample"), callback: () => void this.createSample() });
+		this.addCommand({ id: "open-backups", name: t("cmd.restoreBackup"), callback: () => void this.revealBackups() });
+		this.addCommand({
+			id: "transcribe-url",
+			name: t("cmd.transcribeUrl"),
+			checkCallback: (checking) => {
+				if (this.session.isBusy) return false;
+				if (!checking) void this.activateView().then((view) => view?.pickUrl());
+				return true;
+			},
+		});
+		this.addCommand({
+			id: "translate-transcript",
+			name: t("cmd.translate"),
+			checkCallback: (checking) => {
+				const file = this.app.workspace.getActiveFile();
+				if (!(file instanceof TFile) || file.extension !== "md" || this.session.isBusy) return false;
+				if (!checking) {
+					const notice = new Notice(`Translating to ${this.settings.translateLanguage || "English"}…`, 0);
+					this.translateTranscript(this.targetForExistingNote(file.path), (m) => notice.setMessage(m)).then(
+						() => notice.hide(),
+						(err: Error) => {
+							notice.hide();
+							new Notice(`Translation failed: ${err.message}`, 10_000);
+						},
+					);
+				}
+				return true;
+			},
+		});
+		this.addCommand({ id: "start-whisper-server", name: t("cmd.startServer"), callback: () => void this.startServer().catch((e: Error) => new Notice(e.message, 8000)) });
+		this.addCommand({ id: "stop-whisper-server", name: t("cmd.stopServer"), callback: () => this.server.stop() });
+		this.addCommand({ id: "agent-conventions", name: t("cmd.agentConventions"), callback: () => void this.syncAgentConventions(true) });
 
 		this.app.workspace.onLayoutReady(() => {
 			// One-time move of old course notes into their folders; it runs before the daily pull,
 			// which would otherwise create the new course note first and leave the old one behind.
 			const moved = this.settings.courseNotesInFolders ? Promise.resolve() : this.migrateCourseNotes();
 			void this.syncAgentConventions(false);
-			if (this.settings.canvasUrl && this.settings.canvasToken) {
+			if (this.lms().configured) {
 				void this.refreshCourses().catch(() => undefined);
 				if (this.settings.autoPullDaily && this.settings.lastCanvasPull !== toISODate()) {
 					void moved.then(() => this.pullSlidesCommand(toISODate()));
@@ -357,6 +420,7 @@ export default class LectureCompanionPlugin extends Plugin {
 	}
 
 	onunload(): void {
+		setReporter(undefined);
 		void this.session.dispose();
 		this.server.stop();
 	}
@@ -392,11 +456,33 @@ export default class LectureCompanionPlugin extends Plugin {
 	// ----------------------------------------------------------------- settings
 
 	async loadSettings(): Promise<void> {
-		this.settings = { ...DEFAULT_SETTINGS, ...((await this.loadData()) as Partial<LectureCompanionSettings> | null) };
+		this.settings = migrateSettings((await this.loadData()) as Partial<LectureCompanionSettings> | null);
 	}
 
 	async saveSettings(): Promise<void> {
 		await this.saveData(this.settings);
+	}
+
+	/** The course site slides come from (Canvas, Moodle, or none). */
+	lms(): CourseFilesProvider {
+		switch (this.settings.lms) {
+			case "canvas":
+				return this.canvasClient;
+			case "moodle":
+				return this.moodle;
+			default:
+				return this.noLms;
+		}
+	}
+
+	/** The chat server for summaries, flashcards, catch-up, review notes and translation. */
+	llm(): ChatClient {
+		return this.settings.llmProvider === "openai" ? this.openai : this.ollama;
+	}
+
+	/** The chat model of the selected provider. */
+	chatModel(): string {
+		return this.settings.llmProvider === "openai" ? this.settings.openaiModel.trim() : this.settings.ollamaModel;
 	}
 
 	onServerState(fn: (state: ServerState) => void): () => void {
@@ -432,7 +518,7 @@ export default class LectureCompanionPlugin extends Plugin {
 	// ------------------------------------------------------------------ courses
 
 	async refreshCourses(): Promise<CanvasCourse[]> {
-		this.allCourses = await this.canvas.listCourses();
+		this.allCourses = await this.lms().listCourses();
 		this.applyHiddenCourses();
 		return this.courses;
 	}
@@ -595,7 +681,7 @@ export default class LectureCompanionPlugin extends Plugin {
 	 */
 	async moveCourseNotesIntoFolders(): Promise<number> {
 		const roots = [this.settings.courseFolder, ...(this.meetingFolderSeparate() ? [this.settings.meetingFolder] : [])];
-		let moved = 0;
+		const moves: { file: TFile; dest: string }[] = [];
 		for (const root of roots) {
 			const folder = this.app.vault.getAbstractFileByPath(normalizePath(root));
 			if (!(folder instanceof TFolder)) continue;
@@ -606,11 +692,14 @@ export default class LectureCompanionPlugin extends Plugin {
 				if (!ours) continue;
 				const dest = `${folder.path}/${child.basename}/${child.basename}.md`;
 				if (this.vault.file(dest)) continue;
-				await this.moveWithLinks(child, dest);
-				moved++;
+				moves.push({ file: child, dest });
 			}
 		}
-		return moved;
+		if (moves.length === 0) return 0;
+		const paths = moves.map((m) => m.file.path);
+		await this.backupNotes([...paths, ...this.linkersOf(paths)], "move course notes");
+		for (const m of moves) await this.moveWithLinks(m.file, m.dest);
+		return moves.length;
 	}
 
 	/**
@@ -630,10 +719,14 @@ export default class LectureCompanionPlugin extends Plugin {
 		const newDir = `${root}/${safeFileName(to)}`;
 		const folder = this.app.vault.getAbstractFileByPath(oldDir);
 		if (oldDir.toLowerCase() !== newDir.toLowerCase() && this.app.vault.getAbstractFileByPath(newDir)) throw new Error(`${newDir} already exists.`);
+		if (folder instanceof TFolder) {
+			const inside = this.notesUnder(folder);
+			await this.backupNotes([...inside, ...this.linkersOf(inside)], `rename ${from}`);
+		}
 		// Settings first, so isMeeting/folderFor/vault names follow the new name from here on.
 		// The Canvas course must be known to save the new name for it; otherwise the next slide pull
 		// would file lectures under Canvas's own title again.
-		if (this.canvas.configured && this.courses.length === 0) await this.refreshCourses().catch(() => undefined);
+		if (this.lms().configured && this.courses.length === 0) await this.refreshCourses().catch(() => undefined);
 		const canvasCourse = this.canvasCourseFor(from);
 		const aliased = renameCourseInSettings(this.settings, from, to);
 		if (!aliased && canvasCourse) setCourseAlias(this.settings, canvasCourse, to);
@@ -906,12 +999,122 @@ export default class LectureCompanionPlugin extends Plugin {
 		if (overview) {
 			const s = this.settings;
 			text = stripThinkTags(
-				await this.ollama.chat({ model: s.ollamaModel, messages: buildReviewOverviewMessages(input), options: { num_ctx: s.numCtx, temperature: 0.3 }, keep_alive: "10m", think: false }),
+				await this.llm().chat({ model: this.chatModel(), messages: buildReviewOverviewMessages(input, undefined, s.summaryLanguage), options: { num_ctx: s.numCtx, temperature: 0.3 }, keep_alive: "10m", think: false }),
 			).trim();
 		}
 		const path = reviewNotePath(`${normalizePath(this.folderFor(name))}/${safeFileName(name)}`, input.from, input.to);
 		await this.vault.write(path, buildReviewNote({ ...input, overview: text }));
 		return { path, lectures: lectures.length };
+	}
+
+	// ------------------------------------------------------------------ 0.3.0
+
+	openSettings(): void {
+		const setting = (this.app as unknown as { setting?: { open(): void; openTabById(id: string): void } }).setting;
+		setting?.open();
+		setting?.openTabById(this.manifest.id);
+	}
+
+	/** "Canvas" or "Moodle", for messages. */
+	lmsName(): string {
+		return this.settings.lms === "moodle" ? "Moodle" : this.settings.lms === "canvas" ? "Canvas" : "the course site";
+	}
+
+	openSetup(): void {
+		new SetupModal(this.app, this).open();
+	}
+
+	openReport(summary?: string): void {
+		new ReportModal(this.app, this, summary).open();
+	}
+
+	/** Vault-relative folder of the plugin's backups. */
+	private backupRoot(): string {
+		return `${this.manifest.dir ?? `${this.app.vault.configDir}/plugins/${this.manifest.id}`}/backups`;
+	}
+
+	/**
+	 * Copies notes into the plugin's backups folder before a bulk move or rename, keeping the
+	 * newest backups only. A failure stops the operation: nothing is moved without a copy.
+	 */
+	async backupNotes(paths: string[], reason: string): Promise<string | null> {
+		const files = [...new Set(paths)].filter((p) => this.vault.file(p));
+		if (files.length === 0) return null;
+		const adapter = this.app.vault.adapter;
+		const plan = backupPlan(files, this.backupRoot(), backupStamp(), reason);
+		for (const c of plan.copies) {
+			const dir = c.to.split("/").slice(0, -1).join("/");
+			if (!(await adapter.exists(dir))) await adapter.mkdir(dir);
+			await adapter.write(c.to, await this.vault.read(c.from));
+		}
+		try {
+			const listed = await adapter.list(this.backupRoot());
+			for (const name of backupsToPrune(listed.folders.map((f) => f.split("/").pop() ?? f))) await adapter.rmdir(`${this.backupRoot()}/${name}`, true);
+		} catch {
+			// pruning is best effort
+		}
+		new Notice(t("notice.backup", { count: files.length, s: files.length === 1 ? "" : "s", folder: plan.folder }), 6000);
+		return plan.folder;
+	}
+
+	/** Shows the backups folder in the system file manager (desktop). */
+	async revealBackups(): Promise<void> {
+		const root = this.backupRoot();
+		if (!(await this.app.vault.adapter.exists(root))) {
+			new Notice("No backups yet: they are made before course notes are moved or a course is renamed.");
+			return;
+		}
+		const full = `${this.vault.pluginDir(this.manifest.id, this.manifest.dir)}/backups`;
+		const shell = (window.require?.("electron") as { shell?: { openPath(p: string): Promise<string> } } | undefined)?.shell;
+		if (shell) await shell.openPath(full);
+		else new Notice(`Backups are in ${root}`, 10_000);
+	}
+
+	/** "Try a sample": a lecture note with transcript, slides (a small generated PDF) and summary, no setup needed. */
+	async createSample(): Promise<void> {
+		const date = toISODate();
+		const path = lectureNotePath(this.settings.courseFolder, SAMPLE_COURSE, date);
+		const deckPath = normalizePath(`${this.settings.courseFolder}/${SAMPLE_COURSE}/attachments/${SAMPLE_DECK}`);
+		if (!this.vault.file(deckPath)) await this.vault.createBinary(deckPath, new TextEncoder().encode(samplePdf()).buffer);
+		if (!this.vault.file(path)) await this.vault.write(path, sampleLectureNote(date));
+		await this.ensureCourseLink(SAMPLE_COURSE, date, path);
+		await this.alignSlidesInNote({ path }, false).catch(() => 0);
+		await this.vault.open(path);
+		// A real summary when a chat model answers; the hand-written example otherwise.
+		const ready = await Promise.race([this.llm().version().then(() => true, () => false), new Promise<boolean>((r) => window.setTimeout(() => r(false), 2500))]);
+		if (ready && !this.session.isBusy) {
+			new Notice(t("notice.sampleSummarizing"), 6000);
+			await this.session.summarize({ path }, { course: SAMPLE_COURSE, date }).catch(() => undefined);
+		} else new Notice(t("notice.sampleWritten", { path }), 6000);
+	}
+
+	/** Downloads a media file from a direct link (no streaming-site extraction) for transcription. */
+	async downloadMedia(url: string, onStatus?: (m: string) => void): Promise<{ name: string; bytes: ArrayBuffer }> {
+		if (!isHttpUrl(url)) throw new Error(t("notice.urlBad"));
+		const name = mediaFileName(url);
+		onStatus?.(t("notice.urlDownloading", { name }));
+		const res = await requestUrl({ url: url.trim(), method: "GET", throw: false });
+		if (res.status < 200 || res.status >= 300) throw new Error(`The link answered HTTP ${res.status}.`);
+		const type = Object.entries(res.headers).find(([k]) => k.toLowerCase() === "content-type")?.[1] ?? "";
+		if (!isMediaResponse(type, url)) throw new Error(t("notice.urlNotMedia", { type: type || "an unknown type" }));
+		return { name: mediaFileName(url, type), bytes: res.arrayBuffer };
+	}
+
+	/** "Translate the transcript": the transcript in another language, same timestamps, under its own heading. */
+	async translateTranscript(target: NoteTarget, onStatus?: (m: string) => void): Promise<void> {
+		const section = (await this.vault.readSection(target, SECTION_TRANSCRIPT)) ?? "";
+		const chunks = translationChunks(parseTranscript(section));
+		if (chunks.length === 0) throw new Error(t("notice.noTranscript"));
+		const language = this.settings.translateLanguage.trim() || "English";
+		const out: string[] = [];
+		for (const [i, chunk] of chunks.entries()) {
+			onStatus?.(`Translating to ${language}: part ${i + 1} of ${chunks.length}…`);
+			const text = await this.llm().chat({ model: this.chatModel(), messages: buildTranslateMessages(language, chunk), options: { num_ctx: this.settings.numCtx, temperature: 0.1 }, keep_alive: "10m", think: false });
+			out.push(cleanTranslation(stripThinkTags(text)));
+		}
+		const heading = translatedHeading(language);
+		await this.vault.writeSection(target, heading, out.filter(Boolean).join("\n\n"), "replace");
+		new Notice(t("notice.translated", { heading }), 6000);
 	}
 
 	// ------------------------------------------------------------------- canvas
@@ -989,7 +1192,7 @@ export default class LectureCompanionPlugin extends Plugin {
 
 	/** Remembers "typed name → Canvas course" so pulls use the same note name the user chose. */
 	async learnCourseAlias(typed: string): Promise<void> {
-		if (!this.canvas.configured || this.isMeeting(typed)) return;
+		if (!this.lms().configured || this.isMeeting(typed)) return;
 		if (this.courses.length === 0) await this.refreshCourses().catch(() => undefined);
 		const course = this.canvasCourseFor(typed);
 		if (course && addCourseAlias(this.settings, course, typed)) await this.saveSettings();
@@ -1007,14 +1210,14 @@ export default class LectureCompanionPlugin extends Plugin {
 	 * asking the moment the setting changes (the picker's "Always take the best match" button sets it mid-run).
 	 */
 	async matchSlides(course: string, date: string, target: NoteTarget, text: string, requested: Exclude<SlideMatching, "off">): Promise<void> {
-		if (!this.canvas.configured || this.isMeeting(course)) return;
+		if (!this.lms().configured || this.isMeeting(course)) return;
 		const mode: Exclude<SlideMatching, "off"> = this.settings.slideMatching === "always" ? "always" : requested;
 		const existing = cleanTranscript((await this.vault.readSection(target, SECTION_SLIDES)) ?? "", false);
 		if (existing) return; // slides already chosen for this lecture
 		if (this.courses.length === 0) await this.refreshCourses();
 		const canvasCourse = this.canvasCourseFor(course);
 		if (!canvasCourse) {
-			new Notice(`No Canvas course matches "${course}"; slides not matched. Add an alias in settings if the names differ.`, 8000);
+			new Notice(`No course on ${this.lmsName()} matches "${course}"; slides not matched. Add a course name under Settings → Course files if the names differ.`, 8000);
 			return;
 		}
 		const notice = new Notice("Matching slides to the lecture…", 0);
@@ -1022,7 +1225,7 @@ export default class LectureCompanionPlugin extends Plugin {
 			const result = await this.matcher.run({ canvasCourse, course, date, target, transcript: text, windowOnly: false, mode, replace: false, offerAutoAccept: true, onStatus: (m) => notice.setMessage(m) });
 			notice.hide();
 			if (result.attached.length) new Notice(`Attached: ${result.attached.join(", ")}`, 6000);
-			else if (!result.skipped && result.candidates === 0) new Notice("No slide files found in that Canvas course.", 6000);
+			else if (!result.skipped && result.candidates === 0) new Notice(`No slide files found in that ${this.lmsName()} course.`, 6000);
 			for (const e of result.errors) new Notice(e, 8000);
 		} catch (err) {
 			notice.hide();
@@ -1138,8 +1341,8 @@ export default class LectureCompanionPlugin extends Plugin {
 
 	/** "Choose slides for this lecture note": re-pick from the whole course and replace the Slides section. */
 	async chooseSlidesForNote(path: string): Promise<void> {
-		if (!this.canvas.configured) {
-			new Notice("Set the Canvas URL and access token in settings first.");
+		if (!this.lms().configured) {
+			new Notice("No course site is set up (optional): choose Canvas or Moodle under Settings → Course files to download slides. Recording and summaries work without it.", 8000);
 			return;
 		}
 		const md = await this.vault.read(path);
@@ -1150,13 +1353,13 @@ export default class LectureCompanionPlugin extends Plugin {
 		const date = /^date:\s*(\d{4}-\d{2}-\d{2})/m.exec(fm)?.[1] ?? /(\d{4}-\d{2}-\d{2})\.md$/.exec(path)?.[1] ?? toISODate();
 		const target = this.targetForExistingNote(path);
 		if (this.isMeeting(course)) {
-			new Notice(`"${course}" is a meeting series, so it has no Canvas slides. Remove it from the meeting list in settings if it is a course.`, 8000);
+			new Notice(`"${course}" is a meeting series, so it has no course-site slides. Remove it from the meeting list in settings if it is a course.`, 8000);
 			return;
 		}
 		await this.learnCourseAlias(course);
 		const canvasCourse = this.canvasCourseFor(course);
 		if (!canvasCourse) {
-			new Notice(`No Canvas course matches "${course}". Add an alias in settings (Canvas id = ${course}).`, 8000);
+			new Notice(`No course on ${this.lmsName()} matches "${course}". Add a course name under Settings → Course files (course id = ${course}).`, 8000);
 			return;
 		}
 		const transcript = (await this.vault.readSection(target, SECTION_TRANSCRIPT)) ?? "";
@@ -1175,24 +1378,24 @@ export default class LectureCompanionPlugin extends Plugin {
 	}
 
 	async pullSlidesCommand(date: string, courseQuery?: string): Promise<void> {
-		if (!this.canvas.configured) {
-			new Notice("Set the Canvas URL and access token in settings first.");
+		if (!this.lms().configured) {
+			new Notice("No course site is set up (optional): choose Canvas or Moodle under Settings → Course files to download slides. Recording and summaries work without it.", 8000);
 			return;
 		}
-		const notice = new Notice("Pulling slides from Canvas…", 0);
+		const notice = new Notice(`Pulling slides from ${this.lmsName()}…`, 0);
 		try {
 			if (this.courses.length === 0) await this.refreshCourses();
 			let courses = this.courses;
 			if (courseQuery && this.isMeeting(courseQuery)) {
 				notice.hide();
-				new Notice(`"${courseQuery}" is a meeting series; there are no Canvas slides to pull. Clear the course box to pull for every course.`, 8000);
+				new Notice(`"${courseQuery}" is a meeting series; there are no course-site slides to pull. Clear the course box to pull for every course.`, 8000);
 				return;
 			}
 			if (courseQuery) {
 				const course = this.canvasCourseFor(courseQuery);
 				if (!course) {
 					notice.hide();
-					new Notice(`No active Canvas course matches "${courseQuery}".`);
+					new Notice(`No active ${this.lmsName()} course matches "${courseQuery}".`);
 					return;
 				}
 				courses = [course];
@@ -1224,7 +1427,7 @@ export default class LectureCompanionPlugin extends Plugin {
 			await this.saveSettings();
 		} catch (err) {
 			notice.hide();
-			new Notice(`Canvas pull failed: ${(err as Error).message}`, 8000);
+			new Notice(`Slide pull from ${this.lmsName()} failed: ${(err as Error).message}`, 8000);
 		}
 	}
 
@@ -1241,6 +1444,11 @@ export default class LectureCompanionPlugin extends Plugin {
 		}
 		await workspace.revealLeaf(leaf);
 		const view = leaf.view instanceof LectureView ? leaf.view : null;
+		if (!this.settings.setupShown) {
+			this.settings.setupShown = true;
+			await this.saveSettings();
+			this.openSetup();
+		}
 		if (view && focusRecord) view.containerEl.querySelector<HTMLInputElement>(".lc-course")?.focus();
 		return view;
 	}
@@ -1325,7 +1533,7 @@ class RenameCourseModal extends Modal {
 		to.value = this.current;
 		this.contentEl.createEl("p", {
 			cls: "setting-item-description",
-			text: "Renames the course folder and its course note, sets course: in its notes, keeps links working, and remembers the new name for the Canvas course so new lectures and slide pulls use it.",
+			text: "Renames the course folder and its course note, sets course: in its notes, keeps links working, and remembers the new name for the course-site course so new lectures and slide pulls use it.",
 		});
 		const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
 		const ok = buttons.createEl("button", { text: "Rename", cls: "mod-cta" });

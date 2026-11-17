@@ -6,3 +6,4 @@ data.json
 models/
 .e2e/
 test-vault/.obsidian/workspace*.json
+.obsidian-cache/

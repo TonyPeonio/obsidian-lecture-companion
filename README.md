@@ -1,5 +1,13 @@
 # Lecture Companion
 
+<!--
+TODO (Tony): add a short demo here — a 20–40 s GIF or video of: pick a course → record →
+transcript appears live → stop → summary with clickable [mm:ss] → click one, the recording plays.
+Record with ScreenToGif (Windows) or Kap (macOS), keep it under ~8 MB, save it as
+docs/demo.gif, and replace this comment with:
+![Recording a lecture with Lecture Companion](docs/demo.gif)
+-->
+
 An [Obsidian](https://obsidian.md) plugin for students: **record a lecture and watch the
 transcript appear as it is spoken**, pull the day's **slides from Canvas LMS** into the same
 note, and get a **summary from a local model** when the lecture ends. Everything runs on your
@@ -72,11 +80,74 @@ summaries through [Ollama](https://ollama.com).
   [API](#api-for-other-plugins) that Local Vault Agent uses to list lectures, read transcripts and
   transcribe voice input with the same whisper-server. Settings → Summaries can copy Local Vault
   Agent's Ollama URL and model.
+- **Canvas or Moodle, or neither.** Slides come from Canvas (personal access token) or Moodle
+  (web service token); without a course site everything else works and nothing asks for one.
+  Brightspace (D2L), Blackboard Learn and Google Classroom are not supported: their APIs only accept
+  apps registered by the school (or Google), not personal tokens, and a plugin cannot ship those.
+- **Ollama or any OpenAI-compatible server.** Summaries, flashcards, catch-ups, review notes and
+  translations run on Ollama (default) or on LM Studio, llama.cpp's `llama-server`, Jan, vLLM or
+  LocalAI through `/v1/chat/completions`, streamed.
+- **Languages.** Summaries in the lecture's language or one you choose (*Summary language*), and
+  **Translate the transcript of this note** adds a translated copy with the same timestamps
+  under its own heading, to read side by side. The interface follows Obsidian's language; only
+  English is translated so far (see `src/i18n-en.ts` to contribute one).
+- **Transcribe from a link.** Paste a direct link to an audio or video file (a lecture-capture
+  download, an `.mp4` on a course page) and it is downloaded and transcribed like a file. Streaming
+  sites (YouTube, most lecture-capture players) do not give such a link; download the recording
+  there, or record the computer's audio while it plays.
+- **Report a problem.** Command, button in Settings → Help, and a *Report* link on every error
+  notice. It opens a report you read and edit first (versions, platform, status of whisper.cpp and
+  the chat model, settings with tokens removed, the last 50 log lines, with your vault and home
+  paths replaced by `<vault>` and `~`), then **Copy** or **Open on GitHub**. Nothing is sent
+  automatically.
+- **Backups before bulk changes.** Moving course notes into their folders and renaming a course
+  first copy every affected note to `.obsidian/plugins/lecture-companion/backups/<date time>
+  <what>/` (the newest 10 are kept); the command **Open the backups folder** shows them.
 - **Local Vault Agent bridge.** When `AGENT.md` exists in the vault root, a short block
   describing the lecture note shape (folders, sections, `[mm:ss]` citations, `**[m:ss]**`
   transcript paragraphs) is appended once, between markers, so the agent can answer "what did
   the professor say about isolation forests, and when?" by quoting the transcript paragraph
   with its timestamp and linking the note. On by default; nothing happens without an `AGENT.md`.
+
+### First run
+
+Open the panel (microphone in the ribbon). The **setup checklist** opens once and shows, live,
+what is installed and what is missing, each with a button that fixes it: whisper.cpp (Install /
+Detect), the Whisper model (Download), the chat model server (Ollama or an OpenAI-compatible one)
+and the chat model (Download through Ollama, with progress), and the optional course site. It
+recommends models for your computer (NVIDIA GPU and its memory, Apple silicon, CPU cores, RAM).
+Want to see what you get before installing anything? **Try a sample** writes a sample lecture
+(transcript with marks and a question from class, a small slide deck, links from the transcript
+to the slides, and a summary) under `Courses/Sample course`. Reopen the checklist any time with
+the command **Setup checklist** or from Settings → Help.
+
+### What makes it different
+
+- **Fully local.** Audio is transcribed on your computer by whisper.cpp, which the plugin starts
+  and stops itself; summaries come from a model on your computer or your own network (Ollama, LM
+  Studio, llama.cpp, Jan, vLLM). No account, no cloud service, no telemetry. The only network
+  requests are the ones listed under [Privacy](#privacy-and-network-use).
+- **Built around how lectures work.** Live transcript while you listen, the day's slides from
+  Canvas or Moodle matched to what was said, transcript paragraphs linked to the slide on screen,
+  timestamps that play the recording, marks for important and confusing moments, review notes
+  for exams.
+- **You stay in control of your vault.** The plugin writes only the lecture notes, course notes
+  and attachments it creates. Bulk changes (moving course notes, renaming a course) copy the
+  affected notes into a backup folder first; nothing is ever sent anywhere without a click
+  (problem reports, the survey and the issue page are all opened by you).
+- **Published numbers.** `npm run check-summaries` measures how faithful summaries are (does
+  every `[mm:ss]` a summary cites point at a transcript paragraph that says it?) and fails below
+  90%; the unit tests gate every release, and end-to-end tests in a real Obsidian run in GitHub Actions on every push.
+
+**Compared with other transcription plugins** (as far as their own documentation describes them;
+check their pages for the current state): plugins such as *Whisper*, *Scribe* and *Obsidian
+Transcription* record or take an audio file and send it to a speech-to-text service (OpenAI,
+AssemblyAI, Swiftink) or a self-hosted server, then insert the text, sometimes with an AI summary.
+They are simpler to set up when you are fine with a cloud API. Lecture Companion is the choice when
+the audio must not leave your computer, when you want the text *during* the lecture rather than
+after it, and when you want the lecture structure around it (slides, course notes, review notes).
+It needs more setup (whisper.cpp and a model, which the setup checklist walks through) and a
+desktop computer.
 
 Lecture Companion is part of the Companion suite of local-first Obsidian plugins by Tony Peonio for
 students and researchers: your machine does the work, every change is a diff you approve, and the
@@ -319,6 +390,12 @@ inside the meeting folder counts as a meeting series. The import dialogs (*paste
 | Link transcript paragraphs to slides in this note | Adds `[[deck.pdf#page=N\|slide N]]` links to the open note's transcript where the slide changes (replaces earlier links) |
 | Make a review note | Pick a course and a date range; writes `Review <from>–<to>.md` in the course folder |
 | Ask about this lecture (Local Vault Agent) | Opens Local Vault Agent's chat about the open lecture note (needs that plugin) |
+| Setup checklist | What is installed and what is missing, with fixes and model recommendations |
+| Try a sample lecture | Writes a sample lecture note (no setup needed) |
+| Report a problem | A report you review, then copy or open as a GitHub issue |
+| Transcribe audio from a link (URL) | Downloads a direct link to an audio/video file and transcribes it |
+| Translate the transcript of this note | Adds `## Transcript (<language>)` with the same timestamps |
+| Open the backups folder | Shows the copies made before moves and renames |
 | Summarize this lecture note | Re-runs the summary on the open note (Transcript, or My notes when there is no transcript, plus Slides) |
 | Start / Stop whisper-server | Manual control of the local transcription server |
 | Add lecture conventions to AGENT.md | Writes the Local Vault Agent block now (it also happens on startup when the setting is on) |
@@ -380,6 +457,18 @@ direction, *Ask about this lecture* calls Local Vault Agent's `api.openChatAbout
 the button is hidden and the command says the plugin is needed.
 
 ## Settings worth knowing
+
+- **Course files (optional)** — choose *None*, *Canvas LMS* or *Moodle*. Moodle needs your site
+  address and a token: Moodle → your profile → Preferences → **Security keys** → the key of
+  *Moodle mobile web service* (present when your school allows the Moodle app); otherwise ask
+  the Moodle administrator for a web service token. Only read-only functions are used (site info,
+  your courses, course contents), and the token is added to file downloads, never written to a note.
+- **Chat model server** — *Ollama* (default) or *OpenAI-compatible*. For the latter set the server
+  URL (LM Studio `http://localhost:1234`, llama-server `http://localhost:8080`, Jan
+  `http://localhost:1337`, vLLM `http://localhost:8000`), the model name as the server lists it
+  (**Test** shows them) and, only if the server needs one, an API key. Set the context length when
+  you load the model in that server; *Context window* applies to Ollama only.
+- **Summary language / Translate transcripts to** — empty summary language keeps the lecture's.
 
 - **Threads** — 0 uses one thread per physical core, which is what whisper.cpp runs fastest
   with; adding hyper-threads makes it slower. If the transcript keeps falling behind on a CPU
@@ -463,8 +552,13 @@ This plugin makes network requests only to:
   teachers' names, for the Whisper vocabulary) and files, download the files you asked for, and,
   when class reminders use the Canvas calendar, read today's calendar events;
 - **huggingface.co**, only when you click *Download model*, to fetch the Whisper model you chose;
-- the **Ollama URL** you configure, sending the transcript and slide text for summarizing (and
-  the last few minutes of the live transcript when you press *Catch me up*);
+- the **Ollama URL** or **OpenAI-compatible server URL** you configure, sending the transcript and
+  slide text for summarizing (and the last few minutes of the live transcript when you press
+  *Catch me up*, and the transcript when you translate it); *Download* in the setup checklist asks
+  Ollama to pull the model;
+- the **Moodle URL** you configure (instead of Canvas), with your token, to list your courses and
+  their files and download the ones you asked for;
+- a **link you paste** into *Transcribe audio from a link*, to download that file;
 - **`127.0.0.1`** (the local `whisper-server` it started) or the **remote whisper-server URL**
   you configure, sending recorded audio for transcription.
 
@@ -485,6 +579,32 @@ it, and you can close it.
 Releases are built by GitHub Actions from the committed lockfile and carry
 [artifact attestations](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations/using-artifact-attestations-to-establish-provenance-for-builds).
 
+## Mac (Apple silicon)
+
+Install whisper.cpp with Homebrew (`brew install whisper-cpp`): on M1 and later its build uses the
+GPU through Metal, so even `large-v3-turbo` runs several times faster than real time and keeps up
+live. The plugin finds it in `/opt/homebrew/bin` on its own. The setup checklist counts unified
+memory when it suggests a chat model (about 60% of it is usable by the model). On an Intel Mac the
+Homebrew build runs on the CPU; choose a quantized model (`large-v3-turbo-q5_0`) if it falls behind.
+
+## Mobile
+
+Lecture Companion is desktop-only (`isDesktopOnly`). It starts a local program (whisper-server),
+reads models and runs converters through Node.js, none of which exists in Obsidian mobile, and the
+plugin's code imports those Node modules when it loads. Notes it wrote work on mobile like any
+other notes; clicking a timestamp to play the recording needs the desktop app.
+
+## Beta versions (BRAT)
+
+Betas are GitHub pre-releases tagged like `0.3.1-beta.1`, built by the same workflow as releases.
+To test one, install [BRAT](https://github.com/TfTHacker/obsidian42-brat), choose *Add beta plugin*
+and enter `TonyPeonio/obsidian-lecture-companion`. To publish one (maintainer): set the version in
+`manifest-beta.json` (create it as a copy of `manifest.json`; `manifest.json` keeps the stable
+version, so the community store never offers a beta), commit, then
+`git tag -a 0.3.1-beta.1 -m "Lecture Companion 0.3.1-beta.1"` and push the tag. The workflow checks
+the tag against `manifest-beta.json`, marks the release as a pre-release and attaches
+`manifest-beta.json` as its `manifest.json`.
+
 ## Development
 
 ```bash
@@ -492,6 +612,7 @@ npm install
 npm run dev     # watch build → main.js
 npm test        # unit tests (vitest): chunker, pipeline, whisper client/server manager, Canvas, extractors, notes
 npm run build   # type-check + Obsidian review lint + production bundle
+npm run e2e:obsidian   # end-to-end tests in a real Obsidian (downloaded into .obsidian-cache): course rename, course-note migration, clickable timestamps, sample, import
 npm run check-summaries -- <vault folder>   # faithfulness: does every [mm:ss] a summary cites point at a transcript paragraph within 20 s that shares a content word? Prints precision per note; fails below 90%
 ```
 
