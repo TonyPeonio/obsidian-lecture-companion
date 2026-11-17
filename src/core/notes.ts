@@ -146,6 +146,12 @@ export function retargetLinks(markdown: string, from: string, to: string): strin
 	const fromBase = from.split("/").pop() ?? from;
 	const toBase = to.split("/").pop() ?? to;
 	if (fromBase !== toBase) out = swap(out, fromBase, toBase);
+	// Markdown links by vault path: `[text](Courses/Bio.md)`, `[text](<Courses/Bio.md>)`, and the
+	// URL-encoded form Obsidian writes for spaces (`Courses/ML%20Old/x.md`), with or without `.md`.
+	const pairs = [[from, to], [encodeURI(from), encodeURI(to)]].filter((p, i, all) => i === 0 || p[0] !== all[0]?.[0]);
+	for (const [a, b] of pairs) {
+		out = out.replace(new RegExp(`(\\]\\(<?)${esc(a ?? "")}(\\.md)?(?=[#>)])`, "g"), (_m, open: string, ext: string | undefined) => `${open}${b ?? ""}${ext ?? ""}`);
+	}
 	return out;
 }
 

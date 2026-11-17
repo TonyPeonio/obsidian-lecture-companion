@@ -28,8 +28,19 @@ describe("Lecture Companion in Obsidian", function () {
 	it("moves a course note from before 0.1.19 into its folder on first start, keeping links, after a backup", async function () {
 		await browser.waitUntil(() => exists("Courses/Bio/Bio.md"), { timeout: 30_000, timeoutMsg: "course note was not moved" });
 		expect(await exists("Courses/Bio.md")).toBe(false);
-		// Links are fixed right after the move.
-		await browser.waitUntil(async () => (await read("Courses/Bio/2026-10-14.md")).includes("[[Courses/Bio/Bio|Bio]]"), { timeout: 15_000, timeoutMsg: "link to the moved course note was not updated" });
+		// The lecture's link to the course note still works after the move. Check where it resolves,
+		// not its text: with "Automatically update internal links" on, Obsidian rewrites it in its
+		// own format ([[Bio|Bio]]); with it off, the plugin writes [[Courses/Bio/Bio|Bio]].
+		await browser.waitUntil(
+			() =>
+				browser.executeObsidian(({ app }) => {
+					const from = "Courses/Bio/2026-10-14.md";
+					const resolved = app.metadataCache.resolvedLinks[from] ?? {};
+					const unresolved = app.metadataCache.unresolvedLinks[from] ?? {};
+					return (resolved["Courses/Bio/Bio.md"] ?? 0) > 0 && Object.keys(unresolved).length === 0;
+				}),
+			{ timeout: 15_000, timeoutMsg: "the lecture's link to the moved course note does not resolve to it" },
+		);
 		const made = await backups();
 		expect(made.length).toBeGreaterThan(0);
 	});

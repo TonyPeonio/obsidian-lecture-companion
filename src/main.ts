@@ -618,6 +618,31 @@ export default class LectureCompanionPlugin extends Plugin {
 	}
 
 	/**
+	 * Waits (up to `timeoutMs`) until Obsidian has resolved the links of every note, so
+	 * {@link linkersOf} sees all of them. Right after startup the index is still being built, and
+	 * its first "resolved" event can come before every note is in it.
+	 */
+	private async waitForLinkIndex(timeoutMs = 30_000): Promise<void> {
+		const started = Date.now();
+		const ready = () => this.app.vault.getMarkdownFiles().every((f) => this.app.metadataCache.resolvedLinks[f.path] !== undefined);
+		while (!ready() && Date.now() - started < timeoutMs) await new Promise((r) => window.setTimeout(r, 200));
+	}
+
+	/** Notes whose text links to one of `paths` by its full vault path (`[[path`, `](path`): found without the link index. */
+	private async pathLinkersOf(paths: string[]): Promise<string[]> {
+		const needles = paths.flatMap((p) => {
+			const s = p.replace(/\.md$/, "");
+			return [`[[${s}`, `](${s}`, `](<${s}`, `](${encodeURI(s)}`];
+		});
+		const out: string[] = [];
+		for (const file of this.app.vault.getMarkdownFiles()) {
+			const md = await this.app.vault.cachedRead(file);
+			if (needles.some((n) => md.includes(n))) out.push(file.path);
+		}
+		return out;
+	}
+
+	/**
 	 * Moves a note or folder and keeps links pointing at it. Obsidian rewrites links itself when
 	 * "Automatically update internal links" is on; otherwise (and as a safety net) the links in
 	 * every note that pointed at a moved note are rewritten here. A rename that only changes
@@ -628,18 +653,32 @@ export default class LectureCompanionPlugin extends Plugin {
 		if (item.path === dest) return;
 		const notes = item instanceof TFolder ? this.notesUnder(item) : item instanceof TFile && item.extension === "md" ? [item.path] : [];
 		const renames = notes.map((p) => ({ from: p, to: dest + p.slice(item.path.length) }));
-		const linkers = this.linkersOf(notes);
+		// Links found by the index (any form) plus links by full path found in the text, so a link
+		// is fixed even if the index has not caught up yet.
+		const linkers = [...new Set([...this.linkersOf(notes), ...(await this.pathLinkersOf(notes))])];
 		await this.vault.ensureFolder(dest.split("/").slice(0, -1).join("/"));
 		if (item.path.toLowerCase() === dest.toLowerCase()) {
-			await this.app.fileManager.renameFile(item, `${dest}.renaming-${Date.now()}`);
+			await this.renameQuietly(item, `${dest}.renaming-${Date.now()}`);
 		}
-		await this.app.fileManager.renameFile(item, dest);
+		await this.renameQuietly(item, dest);
 		const moved = new Map(renames.map((r) => [r.from, r.to]));
 		for (const source of linkers) {
 			const file = this.vault.file(moved.get(source) ?? source);
 			if (!file) continue;
 			await this.app.vault.process(file, (md) => renames.reduce((text, r) => retargetLinks(text, r.from.replace(/\.md$/, ""), r.to.replace(/\.md$/, "")), md));
 		}
+	}
+
+	/**
+	 * Renames a file or folder without stopping for a dialog. With Obsidian's "Automatically update
+	 * internal links" on, Obsidian renames it and rewrites every link itself. With it off (Obsidian's
+	 * default), `fileManager.renameFile` stops and asks "Update links?" and waits for a click, which
+	 * would stall a bulk move; the file is renamed directly instead and the caller rewrites links.
+	 */
+	private async renameQuietly(item: TAbstractFile, dest: string): Promise<void> {
+		const autoUpdate = (this.app.vault as unknown as { getConfig?(key: string): unknown }).getConfig?.("alwaysUpdateLinks") === true;
+		if (autoUpdate) await this.app.fileManager.renameFile(item, dest);
+		else await this.app.vault.rename(item, dest);
 	}
 
 	private notesUnder(folder: TFolder): string[] {
@@ -651,18 +690,8 @@ export default class LectureCompanionPlugin extends Plugin {
 		return out;
 	}
 
-	/** Startup: waits for Obsidian's link index (so every link to a moved note is known), then moves the old course notes once. */
+	/** Startup: moves the old course notes once (it waits for Obsidian's link index itself). */
 	private async migrateCourseNotes(): Promise<void> {
-		await new Promise<void>((resolve) => {
-			const cache = this.app.metadataCache;
-			const done = () => {
-				window.clearTimeout(timer);
-				cache.offref(ref);
-				resolve();
-			};
-			const ref = cache.on("resolved", done);
-			const timer = window.setTimeout(done, 8000);
-		});
 		try {
 			const moved = await this.moveCourseNotesIntoFolders();
 			this.settings.courseNotesInFolders = true;
@@ -696,6 +725,7 @@ export default class LectureCompanionPlugin extends Plugin {
 			}
 		}
 		if (moves.length === 0) return 0;
+		await this.waitForLinkIndex();
 		const paths = moves.map((m) => m.file.path);
 		await this.backupNotes([...paths, ...this.linkersOf(paths)], "move course notes");
 		for (const m of moves) await this.moveWithLinks(m.file, m.dest);
@@ -713,6 +743,7 @@ export default class LectureCompanionPlugin extends Plugin {
 		if (!from || !to) throw new Error("Both names are needed.");
 		if (safeFileName(to) !== to.replace(/\s+/g, " ")) throw new Error(`"${to}" has characters a file name cannot hold (\\ / : * ? " < > | # ^ [ ]).`);
 		if (this.session.isBusy && this.session.course.toLowerCase() === from.toLowerCase()) throw new Error("Stop the recording of this course first.");
+		await this.waitForLinkIndex();
 		await this.moveCourseNotesIntoFolders();
 		const root = normalizePath(this.folderFor(from));
 		const oldDir = `${root}/${safeFileName(from)}`;
@@ -792,7 +823,7 @@ export default class LectureCompanionPlugin extends Plugin {
 			if (this.app.vault.getAbstractFileByPath(dest)) continue;
 			const oldPath = file.path;
 			const oldName = file.name;
-			await this.app.fileManager.renameFile(file, dest);
+			await this.renameQuietly(file, dest);
 			renamed.push({ oldName, newName, oldPath });
 		}
 		if (renamed.length === 0) return 0;

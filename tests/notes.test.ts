@@ -122,6 +122,16 @@ describe("paths and formatting", () => {
 		);
 	});
 
+	it("retargets markdown links by vault path, encoded or not", () => {
+		const md = "[c](Courses/Bio.md) [h](Courses/Bio.md#TODO) [a](<Courses/Bio.md>) [n](Courses/Bio) [x](Courses/Biology.md) [e](https://x.org/Courses/Bio.md)";
+		expect(retargetLinks(md, "Courses/Bio", "Courses/Bio/Bio")).toBe(
+			"[c](Courses/Bio/Bio.md) [h](Courses/Bio/Bio.md#TODO) [a](<Courses/Bio/Bio.md>) [n](Courses/Bio/Bio) [x](Courses/Biology.md) [e](https://x.org/Courses/Bio.md)",
+		);
+		expect(retargetLinks("[l](Courses/ML%20Old/2026-10-01.md)", "Courses/ML Old/2026-10-01", "Courses/Machine Learning/2026-10-01")).toBe(
+			"[l](Courses/Machine%20Learning/2026-10-01.md)",
+		);
+	});
+
 	it("renames a course in the settings that name it", () => {
 		const s = {
 			...DEFAULT_SETTINGS,
