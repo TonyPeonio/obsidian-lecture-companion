@@ -16,11 +16,18 @@ summaries through [Ollama](https://ollama.com).
   course, saves them next to the note, embeds them, and extracts their text so the summary
   can use it.
 - **One note per lecture.** `Courses/<course>/<date>.md` with Slides, Summary, Transcript and
-  My notes sections; the course note `Courses/<course>.md` lists them under *Lectures* with a
+  My notes sections; the course note `Courses/<course>/<course>.md`, in the same folder, lists them under *Lectures* with a
   heading per date, each link followed by a one-sentence summary of that day, and keeps a
   *TODO* list. Or keep everything under date headings inside one note per course. For lectures
   summarized before 0.1.12, run **Rebuild course note links** to add the sentences (taken from
   each note's first key point; re-summarize a note for a proper one-sentence summary).
+  Course notes made before 0.1.19 sat next to the course folder (`Courses/<course>.md`); they
+  are moved into it once, on the first start of 0.1.19, and links to them keep working, so the
+  course folder holds one folder per course and nothing else.
+- **Rename a course** without touching files yourself: the command renames the course folder and
+  its course note (`ADVANCED SOFTWARE ENGINEERING-…` → `Advanced Software Engineering`), sets
+  `course:` in its notes, keeps links working, and remembers the new name for the Canvas course,
+  so new lectures and slide pulls use it.
 - **Summaries that cite timestamps.** Key points, definitions, formulas, announcements and
   review questions, each pointing back to `[mm:ss]` in the transcript.
 - **Flashcards (opt-in).** Turn on **Flashcards for Spaced Repetition** under Settings →
@@ -248,7 +255,7 @@ Not everything you record is a class. Type any name in the course box (`Robotics
 `1:1 with Sam`), tick **Meeting** next to it, and record as usual. A meeting:
 
 - is filed under its own folder: `Meetings/<name>/<date>.md`, with a series note
-  `Meetings/<name>.md` that lists them under *Meetings* and keeps the *TODO* list;
+  `Meetings/<name>/<name>.md` that lists them under *Meetings* and keeps the *TODO* list;
 - is **never looked up in Canvas**: no slide matching, no "No Canvas course matches" notice, and
   the name is never saved as an alias for a course;
 - has no Slides section, and its summary is written for meetings: *Overview*, *Discussion*,
@@ -271,6 +278,7 @@ inside the meeting folder counts as a meeting series. The import dialogs (*paste
 | Stop recording and write the note | |
 | Pull today's Canvas slides | Fetches today's new PDF/PPTX files from every active course |
 | Pull Canvas slides for a date… | Same, for a date you choose |
+| Rename a course | Renames the course folder and course note, updates `course:` in its notes, keeps links working, and saves the new name for the Canvas course |
 | Summarize this lecture note | Re-runs the summary on the open note (Transcript, or My notes when there is no transcript, plus Slides) |
 | Start / Stop whisper-server | Manual control of the local transcription server |
 | Add lecture conventions to AGENT.md | Writes the Local Vault Agent block now (it also happens on startup when the setting is on) |

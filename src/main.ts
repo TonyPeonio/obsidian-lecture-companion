@@ -1,9 +1,9 @@
-import { Modal, Notice, Platform, Plugin, requestUrl, TFile, type App, type WorkspaceLeaf } from "obsidian";
+import { Modal, normalizePath, Notice, Platform, Plugin, requestUrl, TFile, TFolder, type App, type TAbstractFile, type WorkspaceLeaf } from "obsidian";
 import { describePull, pullSlides } from "./canvas-pull";
 import { conventionsBlock, upsertConventions } from "./core/agent-bridge";
 import { CanvasClient, resolveCourse, type CanvasCourse } from "./core/canvas";
 import type { HttpRequest } from "./core/http";
-import { addLectureLink, addTodos, courseNotePath, ensureTodoSection, extractTodos, replaceAttachmentRefs, SECTION_MY_NOTES, dateHeading, detectDate, lectureNotePath, migrateCourseIndex, oneLineSummary, renderLectureNote, safeFileName, SECTION_SLIDES, SECTION_SUMMARY, setLectureLinkSummary, SECTION_TRANSCRIPT, stripFrontmatter, toISODate, type NoteKind } from "./core/notes";
+import { addLectureLink, addTodos, courseNotePath, ensureTodoSection, retargetLinks, extractTodos, replaceAttachmentRefs, SECTION_MY_NOTES, dateHeading, detectDate, lectureNotePath, migrateCourseIndex, oneLineSummary, renderLectureNote, safeFileName, SECTION_SLIDES, SECTION_SUMMARY, setLectureLinkSummary, SECTION_TRANSCRIPT, stripFrontmatter, toISODate, type NoteKind } from "./core/notes";
 import { ImportModal, importNotesAsLecture, listImportableNotes } from "./import";
 import { groupEntriesByDate, splitEntries } from "./core/split";
 import { SplitModal, type SplitChoice } from "./split-modal";
@@ -15,7 +15,7 @@ import { parseExtraArgs, WhisperServerManager, type ServerConfig, type ServerSta
 import { defaultThreads, nodeLocateDeps, nodeServerDeps } from "./node/deps";
 import { convertPptxToPdf, findPptxConverter, type PptxConverter } from "./node/convert";
 import { cleanTranscript, LectureSession } from "./session";
-import { addCourseAlias, addMeeting, courseNoteOverride, DEFAULT_SETTINGS, manualCourseList, meetingList, vaultCourseName, type LectureCompanionSettings, type SlideMatching, setCourseHidden, visibleCourses } from "./settings";
+import { addCourseAlias, addMeeting, courseNoteOverride, DEFAULT_SETTINGS, manualCourseList, meetingList, renameCourseInSettings, setCourseAlias, vaultCourseName, type LectureCompanionSettings, type SlideMatching, setCourseHidden, visibleCourses } from "./settings";
 import { LectureCompanionSettingTab } from "./settings-tab";
 import { VaultIO, type NoteTarget } from "./vault";
 import { LectureView, VIEW_TYPE } from "./view";
@@ -172,9 +172,24 @@ export default class LectureCompanionPlugin extends Plugin {
 			},
 		});
 		this.addCommand({
+			id: "rename-course",
+			name: "Rename a course (folder, course note, links and settings)",
+			callback: () => {
+				const active = this.app.workspace.getActiveFile();
+				const current = active ? this.courseOfPath(active.path) : "";
+				new RenameCourseModal(this.app, this, current, (from, to) => {
+					this.renameCourse(from, to).then(
+						(r) => new Notice(`Renamed "${from}" to "${to}": ${r.moved ? "folder and course note moved, " : ""}${r.notes} note${r.notes === 1 ? "" : "s"} updated.`, 8000),
+						(err: Error) => new Notice(`Rename failed: ${err.message}`, 10_000),
+					);
+				}).open();
+			},
+		});
+		this.addCommand({
 			id: "rebuild-course-index",
 			name: "Rebuild course note links (list every lecture note under its date)",
 			callback: async () => {
+				await this.moveCourseNotesIntoFolders();
 				const courses = this.vault.coursesInFolder(this.settings.courseFolder).filter((c) => !this.isMeeting(c));
 				const meetings = this.meetingFolderSeparate() ? this.vault.coursesInFolder(this.settings.meetingFolder) : [];
 				let total = 0;
@@ -246,11 +261,14 @@ export default class LectureCompanionPlugin extends Plugin {
 		this.addCommand({ id: "agent-conventions", name: "Add lecture conventions to AGENT.md", callback: () => void this.syncAgentConventions(true) });
 
 		this.app.workspace.onLayoutReady(() => {
+			// One-time move of old course notes into their folders; it runs before the daily pull,
+			// which would otherwise create the new course note first and leave the old one behind.
+			const moved = this.settings.courseNotesInFolders ? Promise.resolve() : this.migrateCourseNotes();
 			void this.syncAgentConventions(false);
 			if (this.settings.canvasUrl && this.settings.canvasToken) {
 				void this.refreshCourses().catch(() => undefined);
 				if (this.settings.autoPullDaily && this.settings.lastCanvasPull !== toISODate()) {
-					void this.pullSlidesCommand(toISODate());
+					void moved.then(() => this.pullSlidesCommand(toISODate()));
 				}
 			}
 		});
@@ -406,6 +424,162 @@ export default class LectureCompanionPlugin extends Plugin {
 		const roots = [this.settings.courseFolder, this.settings.meetingFolder].map((f) => f.split("/").pop()?.toLowerCase());
 		if (!parent || roots.includes(parent.toLowerCase())) return (parts[parts.length - 1] ?? "").replace(/\.md$/, "");
 		return parent;
+	}
+
+	// ----------------------------------------------------------- moving notes
+
+	/** The course a vault path belongs to: the first folder under the course or meeting folder. */
+	courseOfPath(path: string): string {
+		for (const root of [this.settings.courseFolder, this.settings.meetingFolder]) {
+			const prefix = `${normalizePath(root)}/`;
+			if (!path.startsWith(prefix)) continue;
+			const rest = path.slice(prefix.length).split("/");
+			return rest.length > 1 ? (rest[0] ?? "") : (rest[0] ?? "").replace(/\.md$/, "");
+		}
+		return "";
+	}
+
+	/** Markdown files that link to any of `paths` (by resolved link), so their links can be fixed after a move. */
+	private linkersOf(paths: string[]): string[] {
+		const wanted = new Set(paths);
+		const out: string[] = [];
+		for (const [source, targets] of Object.entries(this.app.metadataCache.resolvedLinks)) {
+			if (Object.keys(targets).some((t) => wanted.has(t))) out.push(source);
+		}
+		return out;
+	}
+
+	/**
+	 * Moves a note or folder and keeps links pointing at it. Obsidian rewrites links itself when
+	 * "Automatically update internal links" is on; otherwise (and as a safety net) the links in
+	 * every note that pointed at a moved note are rewritten here. A rename that only changes
+	 * letter case goes through a temporary name, since Windows and macOS see both names as one.
+	 */
+	private async moveWithLinks(item: TAbstractFile, to: string): Promise<void> {
+		const dest = normalizePath(to);
+		if (item.path === dest) return;
+		const notes = item instanceof TFolder ? this.notesUnder(item) : item instanceof TFile && item.extension === "md" ? [item.path] : [];
+		const renames = notes.map((p) => ({ from: p, to: dest + p.slice(item.path.length) }));
+		const linkers = this.linkersOf(notes);
+		await this.vault.ensureFolder(dest.split("/").slice(0, -1).join("/"));
+		if (item.path.toLowerCase() === dest.toLowerCase()) {
+			await this.app.fileManager.renameFile(item, `${dest}.renaming-${Date.now()}`);
+		}
+		await this.app.fileManager.renameFile(item, dest);
+		const moved = new Map(renames.map((r) => [r.from, r.to]));
+		for (const source of linkers) {
+			const file = this.vault.file(moved.get(source) ?? source);
+			if (!file) continue;
+			await this.app.vault.process(file, (md) => renames.reduce((text, r) => retargetLinks(text, r.from.replace(/\.md$/, ""), r.to.replace(/\.md$/, "")), md));
+		}
+	}
+
+	private notesUnder(folder: TFolder): string[] {
+		const out: string[] = [];
+		for (const child of folder.children) {
+			if (child instanceof TFolder) out.push(...this.notesUnder(child));
+			else if (child instanceof TFile && child.extension === "md") out.push(child.path);
+		}
+		return out;
+	}
+
+	/** Startup: waits for Obsidian's link index (so every link to a moved note is known), then moves the old course notes once. */
+	private async migrateCourseNotes(): Promise<void> {
+		await new Promise<void>((resolve) => {
+			const cache = this.app.metadataCache;
+			const done = () => {
+				window.clearTimeout(timer);
+				cache.offref(ref);
+				resolve();
+			};
+			const ref = cache.on("resolved", done);
+			const timer = window.setTimeout(done, 8000);
+		});
+		try {
+			const moved = await this.moveCourseNotesIntoFolders();
+			this.settings.courseNotesInFolders = true;
+			await this.saveSettings();
+			if (moved > 0) new Notice(`Lecture Companion moved ${moved} course note${moved === 1 ? "" : "s"} into ${moved === 1 ? "its course folder" : "their course folders"} (links kept).`, 10_000);
+		} catch (err) {
+			new Notice(`Could not move course notes into their folders: ${(err as Error).message}`, 10_000);
+		}
+	}
+
+	/**
+	 * Moves course notes from before 0.1.19 (`<folder>/<course>.md`, next to the course folder)
+	 * into the folder (`<folder>/<course>/<course>.md`). Only notes that have a course folder
+	 * beside them, or that carry the plugin's Lectures/Meetings list, are moved; any other note at
+	 * the top of the course folder is left alone. Returns how many were moved.
+	 */
+	async moveCourseNotesIntoFolders(): Promise<number> {
+		const roots = [this.settings.courseFolder, ...(this.meetingFolderSeparate() ? [this.settings.meetingFolder] : [])];
+		let moved = 0;
+		for (const root of roots) {
+			const folder = this.app.vault.getAbstractFileByPath(normalizePath(root));
+			if (!(folder instanceof TFolder)) continue;
+			for (const child of [...folder.children]) {
+				if (!(child instanceof TFile) || child.extension !== "md") continue;
+				const sibling = folder.children.some((c) => c instanceof TFolder && c.name === child.basename);
+				const ours = sibling || /^##\s+(Lectures|Meetings)\s*$/m.test(await this.app.vault.cachedRead(child));
+				if (!ours) continue;
+				const dest = `${folder.path}/${child.basename}/${child.basename}.md`;
+				if (this.vault.file(dest)) continue;
+				await this.moveWithLinks(child, dest);
+				moved++;
+			}
+		}
+		return moved;
+	}
+
+	/**
+	 * "Rename a course": renames the course folder and its course note, sets `course:` in its
+	 * notes, rewrites links to them, and updates the settings that name the course (a Canvas
+	 * alias is added or changed, so new lectures and slide pulls use the new name).
+	 */
+	async renameCourse(fromName: string, toName: string): Promise<{ moved: boolean; notes: number }> {
+		const from = fromName.trim();
+		const to = toName.trim();
+		if (!from || !to) throw new Error("Both names are needed.");
+		if (safeFileName(to) !== to.replace(/\s+/g, " ")) throw new Error(`"${to}" has characters a file name cannot hold (\\ / : * ? " < > | # ^ [ ]).`);
+		if (this.session.isBusy && this.session.course.toLowerCase() === from.toLowerCase()) throw new Error("Stop the recording of this course first.");
+		await this.moveCourseNotesIntoFolders();
+		const root = normalizePath(this.folderFor(from));
+		const oldDir = `${root}/${safeFileName(from)}`;
+		const newDir = `${root}/${safeFileName(to)}`;
+		const folder = this.app.vault.getAbstractFileByPath(oldDir);
+		if (oldDir.toLowerCase() !== newDir.toLowerCase() && this.app.vault.getAbstractFileByPath(newDir)) throw new Error(`${newDir} already exists.`);
+		// Settings first, so isMeeting/folderFor/vault names follow the new name from here on.
+		// The Canvas course must be known to save the new name for it; otherwise the next slide pull
+		// would file lectures under Canvas's own title again.
+		if (this.canvas.configured && this.courses.length === 0) await this.refreshCourses().catch(() => undefined);
+		const canvasCourse = this.canvasCourseFor(from);
+		const aliased = renameCourseInSettings(this.settings, from, to);
+		if (!aliased && canvasCourse) setCourseAlias(this.settings, canvasCourse, to);
+		await this.saveSettings();
+		let notes = 0;
+		if (folder instanceof TFolder) {
+			const note = this.vault.file(`${oldDir}/${safeFileName(from)}.md`);
+			if (note) await this.moveWithLinks(note, `${oldDir}/${safeFileName(to)}.md`);
+			await this.moveWithLinks(folder, newDir);
+			const renamed = this.app.vault.getAbstractFileByPath(newDir);
+			if (renamed instanceof TFolder) {
+				for (const path of this.notesUnder(renamed)) {
+					const file = this.vault.file(path);
+					if (!file) continue;
+					let changed = false;
+					await this.app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
+						if (typeof fm.course === "string" && fm.course.trim().toLowerCase() === from.toLowerCase()) {
+							fm.course = to;
+							changed = true;
+						}
+					});
+					if (changed) notes++;
+				}
+			}
+		}
+		if (this.session.course.toLowerCase() === from.toLowerCase() && !this.session.isBusy) this.session.reset();
+		for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) if (leaf.view instanceof LectureView) leaf.view.refreshCourses();
+		return { moved: folder instanceof TFolder, notes };
 	}
 
 	// -------------------------------------------------------------------- notes
@@ -831,6 +1005,55 @@ export default class LectureCompanionPlugin extends Plugin {
 		const view = leaf.view instanceof LectureView ? leaf.view : null;
 		if (view && focusRecord) view.containerEl.querySelector<HTMLInputElement>(".lc-course")?.focus();
 		return view;
+	}
+}
+
+/** Asks for the course to rename and its new name. */
+class RenameCourseModal extends Modal {
+	constructor(
+		app: App,
+		private plugin: LectureCompanionPlugin,
+		private current: string,
+		private onRename: (from: string, to: string) => void,
+	) {
+		super(app);
+	}
+
+	onOpen(): void {
+		this.titleEl.setText("Rename a course");
+		const form = this.contentEl.createDiv({ cls: "lc-import-form" });
+		form.createEl("label", { text: "Course" });
+		const from = form.createEl("input", { attr: { list: "lc-rename-courses", placeholder: "Current name", spellcheck: "false" } });
+		const list = form.createEl("datalist", { attr: { id: "lc-rename-courses" } });
+		for (const name of this.plugin.courseNames()) list.createEl("option", { attr: { value: name } });
+		from.value = this.current;
+		form.createEl("label", { text: "New name" });
+		const to = form.createEl("input", { attr: { placeholder: "e.g. Advanced Software Engineering", spellcheck: "false" } });
+		to.value = this.current;
+		this.contentEl.createEl("p", {
+			cls: "setting-item-description",
+			text: "Renames the course folder and its course note, sets course: in its notes, keeps links working, and remembers the new name for the Canvas course so new lectures and slide pulls use it.",
+		});
+		const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
+		const ok = buttons.createEl("button", { text: "Rename", cls: "mod-cta" });
+		const submit = () => {
+			if (!from.value.trim() || !to.value.trim() || from.value.trim() === to.value.trim()) {
+				new Notice("Choose a course and type a different new name.");
+				return;
+			}
+			this.close();
+			this.onRename(from.value.trim(), to.value.trim());
+		};
+		ok.addEventListener("click", submit);
+		to.addEventListener("keydown", (e) => {
+			if (e.key === "Enter") submit();
+		});
+		buttons.createEl("button", { text: "Cancel" }).addEventListener("click", () => this.close());
+		window.setTimeout(() => (this.current ? to.select() : from.focus()), 0);
+	}
+
+	onClose(): void {
+		this.contentEl.empty();
 	}
 }
 

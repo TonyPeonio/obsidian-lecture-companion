@@ -1,5 +1,5 @@
 import { type App, normalizePath, TFile, TFolder } from "obsidian";
-import { courseNotePath, nestedSectionBody, safeFileName, sectionBody, upsertNestedSection, upsertSection } from "./core/notes";
+import { courseNotePath, legacyCourseNotePath, nestedSectionBody, safeFileName, sectionBody, upsertNestedSection, upsertSection } from "./core/notes";
 
 /** Where a lecture's sections live: a note, optionally nested under a date heading. */
 export interface NoteTarget {
@@ -141,8 +141,10 @@ export class VaultIO {
 		if (dir instanceof TFolder) {
 			for (const child of dir.children) if (child instanceof TFile && child.extension === "md") out.push(child.path);
 		}
-		const courseNote = normalizePath(courseNotePath(folder, course));
-		if (this.file(courseNote)) out.push(courseNote);
+		// The course note sits inside that folder now; a note still at the old place (next to it) counts too.
+		for (const p of [courseNotePath(folder, course), legacyCourseNotePath(folder, course)].map((x) => normalizePath(x))) {
+			if (this.file(p) && !out.includes(p)) out.push(p);
+		}
 		return out;
 	}
 

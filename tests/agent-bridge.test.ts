@@ -10,7 +10,7 @@ describe("AGENT.md bridge", () => {
 		expect(block).toContain("`Courses/<course>/YYYY-MM-DD.md` is one lecture");
 		expect(block).toContain("`## Slides`");
 		expect(block).toContain("`## Summary`, `## Transcript`, `## My notes`");
-		expect(block).toContain("`Courses/<course>.md` is the course note");
+		expect(block).toContain("`Courses/<course>/<course>.md` is the course note");
 		expect(block).toContain("**[m:ss]**");
 		expect(block).toContain("what did the professor say about X, and when");
 		expect(block).toContain("`Meetings/<series>/YYYY-MM-DD.md`");
@@ -20,7 +20,7 @@ describe("AGENT.md bridge", () => {
 
 	it("follows the folder, layout and date heading settings", () => {
 		const sections = conventionsBlock({ courseFolder: "/School/", noteMode: "per-course-section", dateHeading: "## {{date}}", meetingFolder: "/Work/Meetings" });
-		expect(sections).toContain("`School/<course>.md` holds one `## YYYY-MM-DD` section per lecture");
+		expect(sections).toContain("`School/<course>/<course>.md` holds one `## YYYY-MM-DD` section per lecture");
 		expect(sections).toContain("`Work/Meetings/<series>/YYYY-MM-DD.md`");
 		expect(sections).not.toContain("`School/<course>/YYYY-MM-DD.md`");
 		expect(conventionsBlock({ courseFolder: "School", noteMode: "per-course-section", dateHeading: "## Lecture", meetingFolder: "Meetings" })).toContain("`## Lecture YYYY-MM-DD` section");

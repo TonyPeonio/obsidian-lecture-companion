@@ -91,6 +91,8 @@ export async function listImportableNotes(plugin: LectureCompanionPlugin, folder
 	const out: { file: TFile; date: string | null }[] = [];
 	for (const child of folder.children) {
 		if (!(child instanceof TFile) || child.extension !== "md") continue;
+		// The course note lives in the course folder too (`<course>/<course>.md`); it is not a lecture.
+		if (child.basename === folder.name) continue;
 		const md = await plugin.app.vault.cachedRead(child);
 		if (isLectureNote(md)) continue;
 		if (!stripFrontmatter(md).trim()) continue;

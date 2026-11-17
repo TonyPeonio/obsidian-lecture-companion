@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
 	addLectureLink,
 	courseNotePath,
+	legacyCourseNotePath,
+	retargetLinks,
 	detectDate,
 	migrateCourseIndex,
 	oneLineSummary,
@@ -28,7 +30,7 @@ import {
 	upsertSection,
 } from "../src/core/notes";
 import { buildSummaryMessages, capSlideText, fitToContext, MIN_TRANSCRIPT_CHARS, MIN_TRANSCRIPT_SEC, SLIDE_TEXT_FLOOR_CHARS, SLIDE_TEXT_RATIO, stripThinkTags, tooShortToSummarize, transcriptLength } from "../src/core/summarize";
-import { addCourseAlias, addMeeting, courseNoteOverride, DEFAULT_SETTINGS, hiddenCourseIds, meetingList, parseCourseNotes, parseKeyValueLines, setCourseAlias, setCourseHidden, vaultCourseName, visibleCourses } from "../src/settings";
+import { addCourseAlias, addMeeting, courseNoteOverride, DEFAULT_SETTINGS, hiddenCourseIds, meetingList, parseCourseNotes, parseKeyValueLines, renameCourseInSettings, setCourseAlias, setCourseHidden, vaultCourseName, visibleCourses } from "../src/settings";
 
 describe("one-sentence summaries in the course note", () => {
 	it("takes the In one sentence section, else the first key point or overview sentence", () => {
@@ -102,9 +104,38 @@ describe("paths and formatting", () => {
 	it("sanitizes names and builds paths", () => {
 		expect(safeFileName('CS 101: Intro/Advanced? "Yes" [x] #1')).toBe("CS 101- Intro-Advanced- -Yes- -x- -1");
 		expect(lectureNotePath("/Courses/", "CS101", "2026-11-05")).toBe("Courses/CS101/2026-11-05.md");
-		expect(courseNotePath("Courses", "Math: 2")).toBe("Courses/Math- 2.md");
+		expect(courseNotePath("Courses", "Math: 2")).toBe("Courses/Math- 2/Math- 2.md");
+		expect(legacyCourseNotePath("Courses", "Math: 2")).toBe("Courses/Math- 2.md");
 		expect(dateHeading("## {{date}}", "2026-11-05")).toBe("## 2026-11-05");
 		expect(dateHeading("## Lecture", "2026-11-05")).toBe("## Lecture 2026-11-05");
+	});
+
+	it("retargets links to a moved or renamed note", () => {
+		const md = "See [[School/ASE]] and [[School/ASE|the course]], ![[School/ASE#TODO]], [[ASE]], [[School/ASE-old]] and [[ASE.md]].";
+		expect(retargetLinks(md, "School/ASE", "School/ASE/ASE")).toBe(
+			"See [[School/ASE/ASE]] and [[School/ASE/ASE|the course]], ![[School/ASE/ASE#TODO]], [[ASE]], [[School/ASE-old]] and [[ASE.md]].",
+		);
+		const renamed = retargetLinks("[[School/ASE/2026-08-24|Mon]] [[ASE]] [[ASE|x]]", "School/ASE/ASE", "School/Advanced Software Engineering/Advanced Software Engineering");
+		expect(renamed).toBe("[[School/ASE/2026-08-24|Mon]] [[Advanced Software Engineering]] [[Advanced Software Engineering|x]]");
+		expect(retargetLinks("[[School/ASE/2026-08-24|Mon]]", "School/ASE/2026-08-24", "School/Advanced Software Engineering/2026-08-24")).toBe(
+			"[[School/Advanced Software Engineering/2026-08-24|Mon]]",
+		);
+	});
+
+	it("renames a course in the settings that name it", () => {
+		const s = {
+			...DEFAULT_SETTINGS,
+			courseAliases: "123 = ADVANCED SOFTWARE ENGINEERING\n456 = Bioinformatics",
+			meetings: "Robotics Club",
+			manualCourses: "advanced software engineering\nHASS 465",
+			courseNotes: "ADVANCED SOFTWARE ENGINEERING = Notes/ase.md",
+		};
+		expect(renameCourseInSettings(s, "Advanced Software Engineering", "Advanced Software Engineering (ASE)")).toBe(true);
+		expect(s.courseAliases).toBe("123 = Advanced Software Engineering (ASE)\n456 = Bioinformatics");
+		expect(s.manualCourses).toBe("Advanced Software Engineering (ASE)\nHASS 465");
+		expect(s.courseNotes).toBe("Advanced Software Engineering (ASE) = Notes/ase.md");
+		expect(s.meetings).toBe("Robotics Club");
+		expect(renameCourseInSettings(s, "Nope", "Other")).toBe(false);
 	});
 
 	it("timestamps and dates", () => {

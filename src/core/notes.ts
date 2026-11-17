@@ -123,8 +123,30 @@ export function lectureNotePath(folder: string, course: string, date: string): s
 	return `${trimSlashes(folder)}/${safeFileName(course)}/${date}.md`;
 }
 
+/** The course's overview note, inside the course's own folder: `<folder>/<course>/<course>.md`. */
 export function courseNotePath(folder: string, course: string): string {
+	const name = safeFileName(course);
+	return `${trimSlashes(folder)}/${name}/${name}.md`;
+}
+
+/** Where the course note lived before 0.1.19: next to the course folder, `<folder>/<course>.md`. */
+export function legacyCourseNotePath(folder: string, course: string): string {
 	return `${trimSlashes(folder)}/${safeFileName(course)}.md`;
+}
+
+/**
+ * Points wikilinks and embeds at a moved note: `[[from]]`, `[[from|label]]`, `[[from#heading]]`,
+ * `![[from]]` become `to`. Paths are vault paths without `.md`. Links by bare name (`[[Name]]`)
+ * are rewritten only when the name itself changed. Other text is untouched.
+ */
+export function retargetLinks(markdown: string, from: string, to: string): string {
+	const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	const swap = (text: string, a: string, b: string) => text.replace(new RegExp(`(!?\\[\\[)${esc(a)}(?:\\.md)?(?=\\]\\]|\\||#)`, "g"), (_m, open: string) => `${open}${b}`);
+	let out = swap(markdown, from, to);
+	const fromBase = from.split("/").pop() ?? from;
+	const toBase = to.split("/").pop() ?? to;
+	if (fromBase !== toBase) out = swap(out, fromBase, toBase);
+	return out;
 }
 
 function trimSlashes(p: string): string {

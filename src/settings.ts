@@ -77,6 +77,8 @@ export interface LectureCompanionSettings {
 	/** Meeting series (work, club, 1:1s), one name per line: never looked up in Canvas, filed under `meetingFolder`, summarized as meetings. */
 	meetings: string;
 	meetingFolder: string;
+	/** Set once the course notes from before 0.1.19 (`<folder>/<course>.md`) were moved into their course folders. */
+	courseNotesInFolders: boolean;
 }
 
 export const DEFAULT_SETTINGS: LectureCompanionSettings = {
@@ -121,6 +123,7 @@ export const DEFAULT_SETTINGS: LectureCompanionSettings = {
 	agentBridge: true,
 	meetings: "",
 	meetingFolder: "Meetings",
+	courseNotesInFolders: false,
 };
 
 /** Parses the `key = path` overrides. Keys are matched case-insensitively against course id, name and code. */
@@ -251,4 +254,35 @@ export function addMeeting(settings: LectureCompanionSettings, name: string): bo
 	if (!wanted || meetingList(settings).some((m) => m.toLowerCase() === wanted.toLowerCase())) return false;
 	settings.meetings = settings.meetings.trim() ? `${settings.meetings.trim()}\n${wanted}` : wanted;
 	return true;
+}
+
+/**
+ * Renames a course everywhere the settings mention it by name: the value of a Canvas alias
+ * (`id = name`), the meeting list, the manual course list and the keys of course-note overrides.
+ * Comparison ignores case. Returns true when an alias pointed at the old name.
+ */
+export function renameCourseInSettings(settings: LectureCompanionSettings, oldName: string, newName: string): boolean {
+	const from = oldName.trim().toLowerCase();
+	const to = newName.trim();
+	let aliased = false;
+	const mapLines = (text: string, fn: (line: string) => string) =>
+		text
+			.split("\n")
+			.map((line) => fn(line))
+			.join("\n");
+	settings.courseAliases = mapLines(settings.courseAliases, (line) => {
+		const idx = line.indexOf("=");
+		if (idx <= 0 || line.slice(idx + 1).trim().toLowerCase() !== from) return line;
+		aliased = true;
+		return `${line.slice(0, idx).trim()} = ${to}`;
+	});
+	settings.courseNotes = mapLines(settings.courseNotes, (line) => {
+		const idx = line.indexOf("=");
+		if (idx <= 0 || line.slice(0, idx).trim().toLowerCase() !== from) return line;
+		return `${to} = ${line.slice(idx + 1).trim()}`;
+	});
+	const rename = (line: string) => (line.trim().toLowerCase() === from ? to : line);
+	settings.meetings = mapLines(settings.meetings, rename);
+	settings.manualCourses = mapLines(settings.manualCourses, rename);
+	return aliased;
 }

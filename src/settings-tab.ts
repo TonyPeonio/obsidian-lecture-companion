@@ -312,7 +312,7 @@ export class LectureCompanionSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Course folder")
-			.setDesc("Lecture notes go to <folder>/<course>/<date>.md; the course note <folder>/<course>.md links to them.")
+			.setDesc("Lecture notes go to <folder>/<course>/<date>.md; the course note <folder>/<course>/<course>.md, in the same folder, links to them.")
 			.addText((t) =>
 				t.setValue(s.courseFolder).onChange(async (v) => {
 					s.courseFolder = v.trim().replace(/^\/+|\/+$/g, "") || DEFAULT_SETTINGS.courseFolder;
@@ -371,7 +371,7 @@ export class LectureCompanionSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Meeting folder")
-			.setDesc("Work, club and other meetings go to <folder>/<name>/<date>.md, with a series note <folder>/<name>.md that lists them and keeps the TODO list.")
+			.setDesc("Work, club and other meetings go to <folder>/<name>/<date>.md, with a series note <folder>/<name>/<name>.md in that folder that lists them and keeps the TODO list.")
 			.addText((t) =>
 				t.setValue(s.meetingFolder).onChange(async (v) => {
 					s.meetingFolder = v.trim().replace(/^\/+|\/+$/g, "") || DEFAULT_SETTINGS.meetingFolder;

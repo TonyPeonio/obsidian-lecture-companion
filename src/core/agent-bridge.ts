@@ -33,11 +33,11 @@ export function conventionsBlock(opts: BridgeOptions): string {
 	const layout =
 		opts.noteMode === "per-course-section"
 			? [
-					`- \`${folder}/<course>.md\` holds one \`${heading}\` section per lecture; under it, one level deeper: \`Slides\` (deck embeds and \`[[deck|title]]\` links, slide text in a folded callout), \`Summary\`, \`Transcript\`, \`My notes\` and, when enabled, \`Flashcards\`.`,
+					`- \`${folder}/<course>/<course>.md\` holds one \`${heading}\` section per lecture; under it, one level deeper: \`Slides\` (deck embeds and \`[[deck|title]]\` links, slide text in a folded callout), \`Summary\`, \`Transcript\`, \`My notes\` and, when enabled, \`Flashcards\`.`,
 				]
 			: [
 					`- \`${folder}/<course>/YYYY-MM-DD.md\` is one lecture. Frontmatter: \`course\`, \`date\`, \`tags: [lecture]\`, and \`audio\` (the recording) and \`title\` when known. Sections, in order: \`## Slides\` (deck embeds and \`[[deck|title]]\` links, slide text in a folded callout), \`## Summary\`, \`## Transcript\`, \`## My notes\` and, when enabled, \`## Flashcards\`.`,
-					`- \`${folder}/<course>.md\` is the course note: \`## Lectures\` → \`### YYYY-MM-DD\` → a link to that day's lecture note followed by a one-sentence summary, and a \`## TODO\` list. Use it to find which date covered a topic.`,
+					`- \`${folder}/<course>/<course>.md\` is the course note, inside the course folder next to the lectures: \`## Lectures\` → \`### YYYY-MM-DD\` → a link to that day's lecture note followed by a one-sentence summary, and a \`## TODO\` list. Use it to find which date covered a topic.`,
 				];
 	return [
 		MARK_START,
